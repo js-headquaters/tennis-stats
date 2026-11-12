@@ -574,9 +574,9 @@ Before calling the project complete:
 
 **Files:** Modify `src/application/draftService.ts` (+ test), `src/features/voice/DraftReviewPage.tsx` (+ test).
 
-- [ ] **Step 1: Failing tests** — "Cancel processing" aborts the in-flight provider call, leaves a retryable `waiting-retry` draft with audio kept; a bounded injectable timeout (default 60 s per provider call) yields `waiting-retry` with a safe message; unmounting during processing aborts but releases an owned repository only after the in-flight operation settles so the `waiting-retry` state persists; no duplicate games.
-- [ ] **Step 2: Implement** cancel control (44px), timeout, and ordered cleanup.
-- [ ] **Step 3: Verify and commit** — `fix: allow cancelling and bounding ai processing`.
+- [x] **Step 1: Failing tests** — "Cancel processing" aborts the in-flight provider call, leaves a retryable `waiting-retry` draft with audio kept; a bounded injectable timeout (default 60 s per provider call) yields `waiting-retry` with a safe message; unmounting during processing aborts but releases an owned repository only after the in-flight operation settles so the `waiting-retry` state persists; no duplicate games.
+- [x] **Step 2: Implement** cancel control (44px), timeout, and ordered cleanup.
+- [x] **Step 3: Verify and commit** — `fix: allow cancelling and bounding ai processing`.
 
 ### Task 17: Minimal Parser Context (I-4)
 
