@@ -1,0 +1,65 @@
+{
+  "dataVersion": 0,
+  "opponents": [
+    {
+      "id": "legacy-opp-1",
+      "name": "alex",
+      "normalizedName": "alex",
+      "createdAt": "2026-03-01T08:00:00.000Z",
+      "updatedAt": "2026-03-01T08:00:00.000Z"
+    }
+  ],
+  "matches": [
+    {
+      "id": "legacy-match-1",
+      "opponentId": "legacy-opp-1",
+      "playedAt": "2026-03-01T08:00:00.000Z",
+      "format": "openPractice",
+      "firstServer": "player",
+      "status": "completed",
+      "comments": "",
+      "createdAt": "2026-03-01T08:00:00.000Z",
+      "updatedAt": "2026-03-01T08:00:00.000Z"
+    }
+  ],
+  "sets": [
+    {
+      "id": "legacy-set-1",
+      "matchId": "legacy-match-1",
+      "ordinal": 1,
+      "kind": "standard",
+      "status": "unfinished",
+      "tieBreakId": null,
+      "createdAt": "2026-03-01T08:00:00.000Z",
+      "updatedAt": "2026-03-01T08:00:00.000Z"
+    }
+  ],
+  "games": [
+    {
+      "id": "legacy-game-1",
+      "setId": "legacy-set-1",
+      "ordinal": 1,
+      "server": "player",
+      "result": "won",
+      "score": null,
+      "netErrors": 0,
+      "wideErrors": 0,
+      "longErrors": 0,
+      "doubleFaults": 0,
+      "failedReturns": null,
+      "createdAt": "2026-03-01T08:00:00.000Z",
+      "updatedAt": "2026-03-01T08:00:00.000Z"
+    }
+  ],
+  "tieBreaks": [],
+  "drafts": [
+    {
+      "id": "legacy-draft-1",
+      "matchId": "legacy-match-1",
+      "transcript": "Won the game, one net error",
+      "dataVersion": 1,
+      "createdAt": "2026-03-01T08:00:00.000Z",
+      "updatedAt": "2026-03-01T08:00:00.000Z"
+    }
+  ]
+}

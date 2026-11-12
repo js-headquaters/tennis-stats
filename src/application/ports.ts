@@ -1,4 +1,4 @@
-import type { DatabaseSnapshot, Match, MatchBundle, MatchStatus, Opponent, ParsedDraft, VoiceDraft } from '../domain/model';
+import type { DatabaseSnapshot, Match, MatchBundle, MatchStatus, Opponent, ParsedDraft, TennisRecords, VoiceDraft } from '../domain/model';
 export type { ParsedDraft, DraftGame } from '../domain/model';
 
 export type AiKind = 'transcription' | 'parser';
@@ -28,5 +28,9 @@ export interface TennisRepository {
   confirmDraft(draftId: string, confirmationId: string, preparedBundle: MatchBundle, confirmedAt: string, baseBundle: MatchBundle): Promise<{ status: 'confirmed' | 'alreadyConfirmed' }>;
   listOpponents(): Promise<Opponent[]>;
   replaceAll(snapshot: DatabaseSnapshot): Promise<void>;
+  /** Every stored row of every table, read in one transaction; `dataVersion` is the stored data version. */
+  snapshot(): Promise<DatabaseSnapshot>;
+  /** Insert-only import in one transaction: never modifies an existing row. Any existing id, broken association, child of a match that is not being inserted, or second active match aborts the whole write. */
+  insertRecords(records: TennisRecords): Promise<void>;
   close(): void;
 }

@@ -321,3 +321,51 @@ describe('IndexedDB repository', () => {
     expect((await repo.getActiveMatch())?.match.id).toBe('original');
   });
 });
+
+describe('IndexedDB repository backup support', () => {
+  const records = (item: MatchBundle) => ({ opponents: [item.opponent], matches: [item.match], sets: item.sets, games: item.games, tieBreaks: item.tieBreaks });
+  it('reads every table in one snapshot at the current data version', async () => {
+    const repo = await setup(); const item = bundle('a'); await repo.saveMatchBundle(item); await repo.saveDraft(draftFixture('a'));
+    const snapshot = await repo.snapshot();
+    expect(snapshot.dataVersion).toBe(DATA_VERSION);
+    expect(snapshot.opponents).toEqual([item.opponent]); expect(snapshot.matches).toEqual([item.match]);
+    expect(snapshot.sets).toHaveLength(2); expect(snapshot.games).toHaveLength(2); expect(snapshot.tieBreaks).toHaveLength(1);
+    expect(snapshot.voiceDrafts).toEqual([draftFixture('a')]);
+  });
+  it('inserts new records, including matches for an existing opponent, in one transaction', async () => {
+    const repo = await setup(); await repo.saveMatchBundle(bundle('original', 'completed'));
+    const item = bundle('a', 'completed');
+    await repo.insertRecords({ ...records(item), opponents: [] });
+    expect((await repo.getMatchBundle('a'))?.games).toHaveLength(2);
+    expect(await repo.listOpponents()).toHaveLength(1);
+  });
+  it('rolls back every insert when a record id already exists, never overwriting it', async () => {
+    const repo = await setup(); const original = bundle('original', 'completed'); await repo.saveMatchBundle(original);
+    const item = bundle('a', 'completed');
+    const newOpponent = { ...stamp, id: 'new-o', name: 'Sam', normalizedName: 'sam' };
+    const tampered = { ...records(item), opponents: [newOpponent], games: [...item.games, { ...item.games[0], id: original.games[0].id, ordinal: 9 }] };
+    await expect(repo.insertRecords(tampered)).rejects.toThrow();
+    expect(await repo.getMatchBundle('a')).toBeUndefined();
+    expect(await repo.listOpponents()).toEqual([original.opponent]);
+    expect((await repo.getMatchBundle('original'))?.games.map(g => g.ordinal).sort()).toEqual([1, 2]);
+  });
+  it.each([
+    ['a second active match', () => ({ ...records(bundle('b')), opponents: [] })],
+    ['a missing opponent', () => { const r = records(bundle('b', 'completed')); return { ...r, opponents: [], matches: [{ ...r.matches[0], opponentId: 'missing' }] }; }],
+    ['children for an existing match', () => { const r = records(bundle('original')); return { opponents: [], matches: [], sets: [{ ...r.sets[0], id: 'extra-set', tieBreakId: null }], games: [], tieBreaks: [] }; }],
+    ['a broken tie-break link', () => { const r = records(bundle('b', 'completed')); return { ...r, opponents: [], tieBreaks: [] }; }],
+    ['an orphan game', () => { const r = records(bundle('b', 'completed')); return { ...r, opponents: [], games: [{ ...r.games[0], setId: 'missing' }] }; }],
+  ])('rejects inserting %s without writing anything', async (_label, make) => {
+    const repo = await setup(); await repo.saveMatchBundle(bundle('original'));
+    const before = await repo.snapshot();
+    await expect(repo.insertRecords(make())).rejects.toThrow();
+    expect(await repo.snapshot()).toEqual(before);
+  });
+  it('refuses inserts in read-only recovery mode', async () => {
+    const name = `insert-recovery-${crypto.randomUUID()}`;
+    const db = new TennisDatabase(name); await db.open();
+    const repo = new IndexedDbTennisRepository(db, new Error('recovery'));
+    cleanup.push(async () => { repo.close(); await indexedDBDelete(name); });
+    await expect(repo.insertRecords(records(bundle('a', 'completed')))).rejects.toThrow(/read.only/i);
+  });
+});

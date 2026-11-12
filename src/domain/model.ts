@@ -19,4 +19,6 @@ export interface DraftGame { server: Server; result: MatchResult; netErrors: num
 export interface ParsedDraft { version: 1; games: DraftGame[]; warnings: string[] }
 export interface VoiceDraft extends PersistedEntity { matchId: string; setId: string; confirmationId: string; dataVersion: 1; recording: Blob | null; mimeType: string | null; transcripts: Array<{ text: string; provider: string; model: string; timestamp: string }>; parsedDraft: ParsedDraft | null; state: 'recorded' | 'processing' | 'waiting-retry' | 'ready' | 'error' | 'confirming'; error: { code: string; message: string; phase?: 'transcription' | 'parser' } | null }
 export interface MatchBundle { match: Match; opponent: Opponent; sets: TennisSet[]; games: Game[]; tieBreaks: TieBreak[] }
+/** The tennis entities (no drafts, no metadata) — the content of a backup and of an insert-only import. */
+export interface TennisRecords { opponents: Opponent[]; matches: Match[]; sets: TennisSet[]; games: Game[]; tieBreaks: TieBreak[] }
 export interface DatabaseSnapshot { dataVersion: number; matches: Match[]; opponents: Opponent[]; sets: TennisSet[]; games: Game[]; tieBreaks: TieBreak[]; voiceDrafts: VoiceDraft[] }

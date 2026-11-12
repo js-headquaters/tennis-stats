@@ -1,0 +1,134 @@
+{
+  "format": "tennis-stats-backup",
+  "version": 1,
+  "exportedAt": "2026-11-10T09:00:00.000Z",
+  "data": {
+    "opponents": [
+      {
+        "id": "opp-alex",
+        "name": "Alex",
+        "normalizedName": "alex",
+        "createdAt": "2026-11-01T10:00:00.000Z",
+        "updatedAt": "2026-11-01T10:00:00.000Z"
+      },
+      {
+        "id": "opp-sam",
+        "name": "Sam Lee",
+        "normalizedName": "sam lee",
+        "createdAt": "2026-11-08T09:00:00.000Z",
+        "updatedAt": "2026-11-08T09:00:00.000Z"
+      }
+    ],
+    "matches": [
+      {
+        "id": "match-1",
+        "opponentId": "opp-alex",
+        "playedAt": "2026-11-01T10:00:00.000Z",
+        "format": "oneSet",
+        "firstServer": "player",
+        "status": "completed",
+        "comments": "Windy; served well",
+        "createdAt": "2026-11-01T10:00:00.000Z",
+        "updatedAt": "2026-11-01T11:30:00.000Z"
+      },
+      {
+        "id": "match-2",
+        "opponentId": "opp-sam",
+        "playedAt": "2026-11-08T09:00:00.000Z",
+        "format": "twoSetsSuperTiebreak",
+        "firstServer": "opponent",
+        "status": "active",
+        "comments": null,
+        "createdAt": "2026-11-08T09:00:00.000Z",
+        "updatedAt": "2026-11-08T09:00:00.000Z"
+      }
+    ],
+    "sets": [
+      {
+        "id": "set-1",
+        "matchId": "match-1",
+        "ordinal": 1,
+        "kind": "standard",
+        "status": "completed",
+        "tieBreakId": "tb-1",
+        "createdAt": "2026-11-01T10:00:00.000Z",
+        "updatedAt": "2026-11-01T11:30:00.000Z"
+      },
+      {
+        "id": "set-2",
+        "matchId": "match-2",
+        "ordinal": 1,
+        "kind": "standard",
+        "status": "active",
+        "tieBreakId": null,
+        "createdAt": "2026-11-08T09:00:00.000Z",
+        "updatedAt": "2026-11-08T09:00:00.000Z"
+      }
+    ],
+    "games": [
+      {
+        "id": "game-1",
+        "setId": "set-1",
+        "ordinal": 1,
+        "server": "player",
+        "result": "won",
+        "score": null,
+        "netErrors": 0,
+        "wideErrors": null,
+        "longErrors": 1,
+        "doubleFaults": 0,
+        "failedReturns": null,
+        "createdAt": "2026-11-01T10:00:00.000Z",
+        "updatedAt": "2026-11-01T10:00:00.000Z"
+      },
+      {
+        "id": "game-2",
+        "setId": "set-1",
+        "ordinal": 2,
+        "server": "opponent",
+        "result": "lost",
+        "score": {
+          "player": "30",
+          "opponent": "40"
+        },
+        "netErrors": null,
+        "wideErrors": 2,
+        "longErrors": null,
+        "doubleFaults": null,
+        "failedReturns": 0,
+        "createdAt": "2026-11-01T10:00:00.000Z",
+        "updatedAt": "2026-11-01T10:00:00.000Z"
+      },
+      {
+        "id": "game-3",
+        "setId": "set-2",
+        "ordinal": 1,
+        "server": "opponent",
+        "result": "won",
+        "score": null,
+        "netErrors": null,
+        "wideErrors": null,
+        "longErrors": null,
+        "doubleFaults": null,
+        "failedReturns": null,
+        "createdAt": "2026-11-08T09:00:00.000Z",
+        "updatedAt": "2026-11-08T09:00:00.000Z"
+      }
+    ],
+    "tieBreaks": [
+      {
+        "id": "tb-1",
+        "setId": "set-1",
+        "kind": "standard",
+        "playerPoints": 7,
+        "opponentPoints": 5,
+        "netErrors": 0,
+        "wideErrors": null,
+        "longErrors": null,
+        "doubleFaults": 0,
+        "createdAt": "2026-11-01T11:30:00.000Z",
+        "updatedAt": "2026-11-01T11:30:00.000Z"
+      }
+    ]
+  }
+}

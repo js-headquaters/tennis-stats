@@ -1,5 +1,5 @@
 import type { TennisRepository, MatchFilter } from '../../application/ports';
-import type { DatabaseSnapshot, Match, MatchBundle, VoiceDraft } from '../../domain/model';
+import type { DatabaseSnapshot, Match, MatchBundle, TennisRecords, VoiceDraft } from '../../domain/model';
 import { DATA_VERSION } from './migrations';
 import type { TennisDatabase } from './schema';
 
@@ -159,6 +159,31 @@ export class IndexedDbTennisRepository implements TennisRepository {
           snapshot.voiceDrafts.some(d => !matches.has(d.matchId))) throw new Error('Invalid snapshot associations');
       for (const table of this.db.tables) await table.clear();
       await this.db.opponents.bulkAdd(snapshot.opponents); await this.db.matches.bulkAdd(snapshot.matches); await this.db.sets.bulkAdd(snapshot.sets); await this.db.games.bulkAdd(snapshot.games); await this.db.tieBreaks.bulkAdd(snapshot.tieBreaks); await this.db.drafts.bulkAdd(snapshot.voiceDrafts); await this.db.metadata.put({ key: 'dataVersion', value: DATA_VERSION });
+    });
+  }
+  async snapshot(): Promise<DatabaseSnapshot> {
+    return this.db.transaction('r', this.db.tables, async () => {
+      const dataVersion = (await this.db.metadata.get('dataVersion'))?.value;
+      if (typeof dataVersion !== 'number') throw new Error('Invalid data version');
+      return { dataVersion, opponents: await this.db.opponents.toArray(), matches: await this.db.matches.toArray(), sets: await this.db.sets.toArray(), games: await this.db.games.toArray(), tieBreaks: await this.db.tieBreaks.toArray(), voiceDrafts: await this.db.drafts.toArray() };
+    });
+  }
+  async insertRecords(records: TennisRecords) {
+    this.writable();
+    await this.db.transaction('rw', this.db.opponents, this.db.matches, this.db.sets, this.db.games, this.db.tieBreaks, async () => {
+      const opponents = new Set(records.opponents.map(o => o.id));
+      const matches = new Set(records.matches.map(m => m.id));
+      const sets = new Map(records.sets.map(s => [s.id, s]));
+      const tieBreaks = new Map(records.tieBreaks.map(t => [t.id, t]));
+      for (const match of records.matches) if (!opponents.has(match.opponentId) && !await this.db.opponents.get(match.opponentId)) throw new Error('Imported match opponent missing');
+      // Children may only belong to matches inserted in this same write, so existing match bundles are never altered.
+      if (records.sets.some(s => !matches.has(s.matchId) || (s.tieBreakId !== null && tieBreaks.get(s.tieBreakId)?.setId !== s.id)) ||
+          records.games.some(g => !sets.has(g.setId)) ||
+          records.tieBreaks.some(t => sets.get(t.setId)?.tieBreakId !== t.id)) throw new Error('Invalid import associations');
+      const active = records.matches.filter(m => m.status === 'active').length;
+      if (active > 1 || (active === 1 && await this.db.matches.where('status').equals('active').count() > 0)) throw new Error('An active match already exists');
+      // bulkAdd fails on any existing key, aborting the transaction: nothing is overwritten and nothing is partially written.
+      await this.db.opponents.bulkAdd(records.opponents); await this.db.matches.bulkAdd(records.matches); await this.db.sets.bulkAdd(records.sets); await this.db.games.bulkAdd(records.games); await this.db.tieBreaks.bulkAdd(records.tieBreaks);
     });
   }
 }
