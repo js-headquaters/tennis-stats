@@ -9,6 +9,12 @@ export function validateGame(input: Game): ValidationResult<Game> {
   for (const field of ['id', 'setId', 'createdAt', 'updatedAt'] as const) {
     if (typeof input[field] !== 'string' || input[field].trim() === '') issues.push({ field, message: 'Must be a non-empty string' });
   }
+  if (input.server !== 'player' && input.server !== 'opponent') issues.push({ field: 'server', message: "Must be 'player' or 'opponent'" });
+  if (!Number.isInteger(input.ordinal) || input.ordinal < 0) issues.push({ field: 'ordinal', message: 'Must be a non-negative integer' });
+  const allowedPoints = ['0', '15', '30', '40', 'AD'];
+  if (input.score !== null && (!input.score || typeof input.score !== 'object' || !allowedPoints.includes(input.score.player) || !allowedPoints.includes(input.score.opponent))) {
+    issues.push({ field: 'score', message: "Must be null or a pair of allowed score strings ('0', '15', '30', '40', 'AD')" });
+  }
   for (const field of ['firstServesIn', 'firstServesTotal', 'secondServesIn', 'secondServesTotal', 'aces', 'doubleFaults', 'winners', 'unforcedErrors', 'failedReturns'] as const) {
     const value = input[field];
     if (value !== null && (!Number.isInteger(value) || value < 0)) issues.push({ field, message: 'Must be a non-negative integer or null' });

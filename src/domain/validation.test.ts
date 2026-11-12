@@ -26,6 +26,26 @@ describe('domain validation', () => {
     expect(validateGame(game({ aces: count }))).toMatchObject({ ok: false });
   });
 
+  it.each(['unknown', '', null])('rejects invalid server %s', (server) => {
+    expect(validateGame(game({ server } as unknown as Partial<Game>))).toMatchObject({ ok: false });
+  });
+
+  it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])('rejects invalid ordinal %s', (ordinal) => {
+    expect(validateGame(game({ ordinal }))).toMatchObject({ ok: false });
+  });
+
+  it('accepts zero ordinal', () => {
+    expect(validateGame(game({ ordinal: 0 })).ok).toBe(true);
+  });
+
+  it.each([{ player: 'Love', opponent: '0' }, { player: '15', opponent: 40 }, {}])('rejects malformed score %o', (score) => {
+    expect(validateGame(game({ score } as unknown as Partial<Game>))).toMatchObject({ ok: false });
+  });
+
+  it('accepts the allowed score boundary values', () => {
+    expect(validateGame(game({ score: { player: '0', opponent: 'AD' } })).ok).toBe(true);
+  });
+
   it('rejects failed returns when the player served', () => {
     expect(validateGame(game({ failedReturns: 1 }))).toMatchObject({ ok: false });
   });
