@@ -288,7 +288,11 @@ export interface AiScenario {
 }
 export type AiCallKind = 'transcription' | 'openai-parser' | 'anthropic-parser' | 'unexpected';
 export interface AiCall { kind: AiCallKind; url: string; method: string; headers: Record<string, string>; body: string | null }
-export interface AiMock { calls: AiCall[]; release(): void; callsOf(kind: AiCallKind): AiCall[] }
+export interface AiMock {
+  calls: AiCall[]; release(): void; callsOf(kind: AiCallKind): AiCall[];
+  /** Changes the scenario for later calls (e.g. a revised transcript/draft for a voice correction). Reply sequences keep their position. */
+  update(patch: Partial<AiScenario>): void;
+}
 
 export const aiScenarios = {
   success: (games = 2, extra: Partial<AiScenario> = {}): AiScenario => ({ games, ...extra }),
@@ -309,7 +313,8 @@ export function draftGamesFor(scenario: AiScenario): DraftGame[] {
  * Routes every OpenAI/Anthropic request to deterministic replies shaped exactly like the adapters in
  * src/infrastructure/ai expect. Any other request to those hosts is recorded as 'unexpected' and aborted.
  */
-export async function mockAi(page: Page, scenario: AiScenario = aiScenarios.success()): Promise<AiMock> {
+export async function mockAi(page: Page, initial: AiScenario = aiScenarios.success()): Promise<AiMock> {
+  const scenario: AiScenario = { ...initial };
   const calls: AiCall[] = [];
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
@@ -329,7 +334,8 @@ export async function mockAi(page: Page, scenario: AiScenario = aiScenarios.succ
     if (scenario.delay === 'manual') await gate; else if (scenario.delay) await new Promise(resolve => setTimeout(resolve, scenario.delay as number));
     const reply = kind === 'transcription' ? pick(scenario.transcription, 'transcription') : pick(scenario.parser, 'parser');
     if (reply.type === 'network') { await route.abort('failed'); return; }
-    if (reply.type === 'status') { await route.fulfill({ status: reply.status, headers: corsHeaders, contentType: 'application/json', body: JSON.stringify({ error: { message: 'mocked provider error' } }) }); return; }
+    // Like real providers, the error body echoes the credential it received, so a UI that surfaced provider text would leak it.
+    if (reply.type === 'status') { const credential = request.headers()['authorization'] ?? request.headers()['x-api-key'] ?? ''; await route.fulfill({ status: reply.status, headers: corsHeaders, contentType: 'application/json', body: JSON.stringify({ error: { message: `mocked provider error; received credential: ${credential}` } }) }); return; }
     const content = reply.type === 'malformed' ? '{"version":1,"games":[{' : parsed();
     const body = kind === 'transcription'
       ? (reply.type === 'malformed' ? { unexpected: true } : { text: scenario.transcript ?? 'Game one, I served and won.' })
@@ -337,8 +343,9 @@ export async function mockAi(page: Page, scenario: AiScenario = aiScenarios.succ
         : { id: 'msg-mock', type: 'message', role: 'assistant', content: [{ type: 'text', text: content }] };
     await route.fulfill({ status: 200, headers: corsHeaders, contentType: 'application/json', body: JSON.stringify(body) });
   }
-  await page.route(/^https:\/\/api\.(openai|anthropic)\.com\//, handle);
-  return { calls, release, callsOf: kind => calls.filter(call => call.kind === kind) };
+  // A held request whose page reloaded meanwhile can no longer be answered; that is expected, not a test failure.
+  await page.route(/^https:\/\/api\.(openai|anthropic)\.com\//, (route, request) => handle(route, request).catch(error => { if (!/already handled|closed|Target|aborted|canceled|cancelled/i.test(String(error))) throw error; }));
+  return { calls, release, callsOf: kind => calls.filter(call => call.kind === kind), update: patch => { Object.assign(scenario, patch); } };
 }
 const corsHeaders = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'authorization, content-type, x-api-key, anthropic-version, anthropic-dangerous-direct-browser-access', 'access-control-allow-methods': 'POST, OPTIONS' };
 
@@ -360,8 +367,10 @@ export async function configureAi(page: Page, { parser = 'openai' }: { parser?: 
  * - `mp4`: iOS Safari-like, only audio/mp4 supported (default).   - `webm`: Chromium-like, only audio/webm;codecs=opus.
  * - `no-format`: isTypeSupported() is always false; the recorder falls back to the browser default (audio/webm blob).
  * - `denied`: getUserMedia rejects with NotAllowedError.            - `unsupported`: no MediaRecorder and no mediaDevices.
+ * - `format-rejected`: no listed format is supported and the recorder constructor rejects the default (NotSupportedError).
+ * - `empty`: recording works but stop() yields a zero-byte blob (e.g. iOS producing no audio data).
  */
-export type FakeMicrophoneVariant = 'mp4' | 'webm' | 'no-format' | 'denied' | 'unsupported';
+export type FakeMicrophoneVariant = 'mp4' | 'webm' | 'no-format' | 'denied' | 'unsupported' | 'format-rejected' | 'empty';
 export interface FakeMicrophoneState { getUserMediaCalls: number; recordersCreated: number; requestedMimeTypes: Array<string | null>; stoppedTracks: number }
 
 /** Installs the stub as an init script (call before the first navigation). Each recording yields a deterministic blob. */
@@ -374,8 +383,8 @@ export async function installFakeMicrophone(page: Page, variant: FakeMicrophoneV
       Object.defineProperty(navigator, 'mediaDevices', { value: undefined, configurable: true });
       return;
     }
-    const supported = variant === 'mp4' ? ['audio/mp4'] : variant === 'webm' ? ['audio/webm;codecs=opus', 'audio/webm'] : [];
-    const fallback = variant === 'mp4' ? 'audio/mp4' : 'audio/webm';
+    const supported = variant === 'mp4' || variant === 'empty' ? ['audio/mp4'] : variant === 'webm' ? ['audio/webm;codecs=opus', 'audio/webm'] : [];
+    const fallback = variant === 'mp4' || variant === 'empty' ? 'audio/mp4' : 'audio/webm';
     const mediaDevices = {
       async getUserMedia() {
         state.getUserMediaCalls++;
@@ -391,14 +400,16 @@ export async function installFakeMicrophone(page: Page, variant: FakeMicrophoneV
       ondataavailable: ((event: { data: Blob }) => void) | null = null; onstop: (() => void) | null = null; onerror: (() => void) | null = null;
       private readonly index: number;
       constructor(_stream: MediaStream, options?: { mimeType?: string }) {
-        this.index = ++state.recordersCreated; state.requestedMimeTypes.push(options?.mimeType ?? null);
+        state.requestedMimeTypes.push(options?.mimeType ?? null);
+        if (variant === 'format-rejected') throw new DOMException('No supported audio format', 'NotSupportedError');
+        this.index = ++state.recordersCreated;
         this.mimeType = options?.mimeType ?? fallback;
       }
       start() { if (this.state !== 'inactive') throw new DOMException('Invalid state', 'InvalidStateError'); this.state = 'recording'; }
       stop() {
         if (this.state === 'inactive') return;
         this.state = 'inactive';
-        const data = new Blob([`FAKE-AUDIO-${this.index}-`.repeat(32)], { type: this.mimeType });
+        const data = new Blob(variant === 'empty' ? [] : [`FAKE-AUDIO-${this.index}-`.repeat(32)], { type: this.mimeType });
         setTimeout(() => { this.ondataavailable?.({ data }); this.onstop?.(); }, 0);
       }
     }

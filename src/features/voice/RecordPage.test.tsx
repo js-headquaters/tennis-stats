@@ -4,7 +4,7 @@ import { expect, it, vi } from 'vitest';
 import type { TennisRepository } from '../../application/ports';
 import type { MatchBundle, VoiceDraft } from '../../domain/model';
 import { createDraftService } from '../../application/draftService';
-import RecordPage from './RecordPage';
+import RecordPage, { SAVE_TIMEOUT_MS } from './RecordPage';
 import { dependencies } from '../../app/dependencies';
 import { workRegistry } from '../../app/workGuard';
 
@@ -158,4 +158,72 @@ it('releases the update work guard when a recording is cancelled or the page unm
   fireEvent.click(screen.getByRole('button', { name:'Start recording' }));
   await screen.findByRole('button', { name:'Stop recording' }); expect(workRegistry.isBusy()).toBe(true);
   view.unmount(); expect(workRegistry.isBusy()).toBe(false);
+});
+function deferred<T>() { let resolve!: (value: T) => void; let reject!: (reason: unknown) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
+type Persist = (input: { matchId: string; setId: string; audio: Blob; mimeType: string }) => Promise<Pick<VoiceDraft, 'id' | 'state'>>;
+function renderWithSaveTimer(persist: ReturnType<typeof vi.fn<Persist>>) {
+  const timers: Array<{ action: () => void; delay: number; cleared: boolean }> = [];
+  const scheduler = { schedule:vi.fn((action: () => void, delay: number) => { const timer = { action, delay, cleared:false }; timers.push(timer); return () => { timer.cleared = true; }; }) };
+  const repository = { getMatchBundle:vi.fn().mockResolvedValue(bundle), listDrafts:vi.fn().mockResolvedValue([]), close:vi.fn() } as unknown as TennisRepository;
+  const recorder = { start:vi.fn().mockResolvedValue(undefined), stop:vi.fn().mockResolvedValue({ blob:new Blob(['x']), mimeType:'audio/mp4' }), cancel:vi.fn().mockResolvedValue(undefined) };
+  render(<MemoryRouter initialEntries={['/matches/m/record']}><Routes><Route path="/matches/:matchId/record" element={<RecordPage repository={repository} createRecorder={() => recorder} createService={() => ({ persistDraftFromAudio:persist })} scheduler={scheduler} />} /><Route path="/voice/:draftId" element={<p>Draft review</p>} /></Routes></MemoryRouter>);
+  const saveTimeout = async () => { const timer = timers.filter(t => t.delay === SAVE_TIMEOUT_MS && !t.cleared).at(-1); expect(timer).toBeDefined(); await act(async () => timer!.action()); };
+  return { saveTimeout, timers };
+}
+async function recordAndStop() {
+  fireEvent.click(await screen.findByRole('button', { name:'Start recording' }));
+  fireEvent.click(await screen.findByRole('button', { name:'Stop recording' }));
+  await screen.findByText('Saving recording…');
+}
+const slowSave = 'Saving the recording is taking too long. It is kept on this page; retry saving, or use manual entry.';
+it('stops claiming "Saving…" when a save never settles, keeping the audio, retry and manual entry', async () => {
+  const pending = deferred<{ id: string; state: 'recorded' }>(); const persist = vi.fn<Persist>().mockReturnValue(pending.promise);
+  const { saveTimeout } = renderWithSaveTimer(persist);
+  await recordAndStop(); await saveTimeout();
+  expect(screen.getByRole('alert')).toHaveTextContent(slowSave); expect(workRegistry.isBusy()).toBe(true);
+  expect(screen.getByRole('button', { name:'Retry saving recording' })).toBeInTheDocument();
+  expect(screen.getByRole('link', { name:/manual entry/i })).toHaveAttribute('href', '/matches/m/live');
+  // Retrying re-awaits the same pending write instead of saving the recording twice.
+  fireEvent.click(screen.getByRole('button', { name:'Retry saving recording' })); await screen.findByText('Saving recording…');
+  expect(persist).toHaveBeenCalledTimes(1);
+  await act(async () => pending.resolve({ id:'d', state:'recorded' }));
+  expect(await screen.findByText('Draft review')).toBeInTheDocument(); expect(persist).toHaveBeenCalledTimes(1);
+});
+it('opens the draft when a timed-out save completes later', async () => {
+  const pending = deferred<{ id: string; state: 'recorded' }>(); const persist = vi.fn<Persist>().mockReturnValue(pending.promise);
+  const { saveTimeout } = renderWithSaveTimer(persist);
+  await recordAndStop(); await saveTimeout(); await screen.findByRole('button', { name:'Retry saving recording' });
+  await act(async () => pending.resolve({ id:'d', state:'recorded' }));
+  expect(await screen.findByText('Draft review')).toBeInTheDocument(); expect(persist).toHaveBeenCalledTimes(1);
+});
+it('writes again on retry only once a timed-out save has actually failed', async () => {
+  const pending = deferred<{ id: string; state: 'recorded' }>(); const persist = vi.fn<Persist>().mockReturnValueOnce(pending.promise).mockResolvedValueOnce({ id:'d2', state:'recorded' });
+  const { saveTimeout } = renderWithSaveTimer(persist);
+  await recordAndStop(); await saveTimeout();
+  await act(async () => pending.reject(new Error('secret-sentinel')));
+  expect(screen.getByRole('alert')).toHaveTextContent(slowSave); expect(document.body).not.toHaveTextContent('secret-sentinel');
+  fireEvent.click(screen.getByRole('button', { name:'Retry saving recording' }));
+  expect(await screen.findByText('Draft review')).toBeInTheDocument(); expect(persist).toHaveBeenCalledTimes(2);
+  expect(persist.mock.calls[1][0].audio).toBe(persist.mock.calls[0][0].audio);
+});
+it('does not navigate away from a new recording when a discarded timed-out save completes', async () => {
+  const pending = deferred<{ id: string; state: 'recorded' }>(); const persist = vi.fn<Persist>().mockReturnValue(pending.promise);
+  const { saveTimeout } = renderWithSaveTimer(persist);
+  await recordAndStop(); await saveTimeout();
+  fireEvent.click(screen.getByRole('button', { name:'Start recording' })); await screen.findByRole('button', { name:'Stop recording' });
+  await act(async () => pending.resolve({ id:'d', state:'recorded' }));
+  expect(screen.queryByText('Draft review')).not.toBeInTheDocument(); expect(screen.getByRole('button', { name:'Stop recording' })).toBeInTheDocument();
+});
+it('clears the save timer once the save settles in time', async () => {
+  const persist = vi.fn<Persist>().mockResolvedValue({ id:'d', state:'recorded' });
+  const { timers } = renderWithSaveTimer(persist);
+  fireEvent.click(await screen.findByRole('button', { name:'Start recording' }));
+  fireEvent.click(await screen.findByRole('button', { name:'Stop recording' }));
+  expect(await screen.findByText('Draft review')).toBeInTheDocument();
+  expect(timers.filter(t => t.delay === SAVE_TIMEOUT_MS)).toHaveLength(1); expect(timers.find(t => t.delay === SAVE_TIMEOUT_MS)?.cleared).toBe(true);
+});
+it('explains how to enable a denied microphone', async () => {
+  const { recorder } = setup(); recorder.start.mockRejectedValue({ code:'permission' });
+  fireEvent.click(await screen.findByRole('button', { name:'Start recording' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent(/allow microphone access for this site in your browser or device settings/i);
 });

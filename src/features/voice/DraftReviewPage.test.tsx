@@ -57,7 +57,7 @@ it('records refinement only on explicit stop and supports cancellation', async (
 });
 it('keeps manual entry on permission denial and empty audio', async () => {
   const { recorder, service } = setup(); recorder.start.mockRejectedValueOnce({ code:'permission', message:'secret' });
-  fireEvent.click(await screen.findByRole('button', { name:'Start recording' })); expect(await screen.findByRole('alert')).toHaveTextContent(/permission/i);
+  fireEvent.click(await screen.findByRole('button', { name:'Start recording' })); expect(await screen.findByRole('alert')).toHaveTextContent(/permission/i); expect(screen.getByRole('alert')).toHaveTextContent(/allow microphone access for this site in your browser or device settings/i);
   fireEvent.click(screen.getByRole('button', { name:'Start recording' })); recorder.stop.mockResolvedValueOnce({ blob:new Blob(), mimeType:'audio/webm' }); fireEvent.click(await screen.findByRole('button', { name:'Stop recording' }));
   expect(await screen.findByRole('alert')).toHaveTextContent(/empty/i); expect(service.refineDraftWithAudio).not.toHaveBeenCalled(); expect(screen.getByRole('link', { name:/manual entry/i })).toBeInTheDocument();
 });

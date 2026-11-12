@@ -13,7 +13,13 @@ const defaultScheduler: Scheduler = { schedule(action, delay) { const id = setTi
 type Props = { repository?: TennisRepository; createRecorder?: () => AudioRecorder; createService?: (repository: TennisRepository) => Service; scheduler?: Scheduler };
 type State = 'idle' | 'requesting-permission' | 'recording' | 'stopping' | 'saving' | 'error';
 const draftLabels: Record<VoiceDraft['state'], string> = { recorded:'recorded, not yet processed', processing:'processing was interrupted', 'waiting-retry':'waiting to retry', ready:'ready for review', error:'needs attention', confirming:'confirmation was interrupted' };
-const messages: Record<string, string> = { permission:'Microphone permission was denied or unavailable.', unsupported:'Audio recording or its format is not supported on this device.', empty:'The recording was empty. Please try again.', failed:'Recording failed. Please try again.', start:'Recording could not start. Please try again.', storage:'The recording could not be saved on this device. It is kept on this page; retry saving before leaving.' };
+/** A recording save that has not settled by then is reported as stuck (IndexedDB can leave a write pending, e.g. Blobs on WebKit). */
+export const SAVE_TIMEOUT_MS = 10000;
+type Audio = { blob: Blob; mimeType: string };
+type PendingSave = { audio: Audio; promise: Promise<Pick<VoiceDraft, 'id' | 'state'>> };
+const messages: Record<string, string> = { permission:'Microphone permission was denied or unavailable. Allow microphone access for this site in your browser or device settings, then try again, or use manual entry.', unsupported:'Audio recording or its format is not supported on this device.', empty:'The recording was empty. Please try again.', failed:'Recording failed. Please try again.', start:'Recording could not start. Please try again.', storage:'The recording could not be saved on this device. It is kept on this page; retry saving before leaving.', 'storage-timeout':'Saving the recording is taking too long. It is kept on this page; retry saving, or use manual entry.' };
+
+function safeCode(reason: unknown) { try { const code = (reason as { code?: unknown })?.code; return typeof code === 'string' ? code : ''; } catch { return ''; /* Untrusted error. */ } }
 
 export default function RecordPage(props: Props) {
   const { matchId = '' } = useParams();
@@ -25,7 +31,10 @@ function RecordContent({ matchId, repository, createRecorder = dependencies.crea
   const [loading, setLoading] = useState(true); const [loadError, setLoadError] = useState(''); const [attempt, setAttempt] = useState(0);
   const [drafts, setDrafts] = useState<VoiceDraft[]>([]); const [listError, setListError] = useState(false);
   const [state, setState] = useState<State>('idle'); const [error, setError] = useState('');
-  const [unsaved, setUnsaved] = useState<{ blob: Blob; mimeType: string } | null>(null);
+  const [unsaved, setUnsavedState] = useState<Audio | null>(null); const unsavedRef = useRef<Audio | null>(null);
+  function setUnsaved(audio: Audio | null) { unsavedRef.current = audio; setUnsavedState(audio); }
+  // The one in-flight write of the unsaved audio: a retry re-awaits it instead of writing a duplicate draft.
+  const saving = useRef<PendingSave | null>(null); const timedOut = useRef(false);
   // Unpersisted audio or an in-progress recording would be lost by a reload, so it blocks app updates.
   useWorkHold(state === 'requesting-permission' || state === 'recording' || state === 'stopping' || state === 'saving' || !!unsaved);
   const recorder = useRef<AudioRecorder | null>(null); const lock = useRef(false); const alive = useRef(true); const timer = useRef<(() => void) | undefined>(undefined); const generation = useRef(0);
@@ -54,7 +63,7 @@ function RecordContent({ matchId, repository, createRecorder = dependencies.crea
     return () => { cancelled = true; alive.current = false; generation.current++; timer.current?.(); void recorder.current?.cancel().catch(() => {}); recorder.current = null; close(); };
   }, [repository, matchId, attempt]);
   function showError(reason: unknown) {
-    let code = ''; try { code = (reason as { code?: string })?.code ?? ''; } catch { /* Untrusted error. */ }
+    const code = safeCode(reason);
     setError(messages[code] ?? 'Recording or processing failed. Please try again. Previously saved recordings may still be available.'); setState('error');
   }
   async function start() {
@@ -77,13 +86,28 @@ function RecordContent({ matchId, repository, createRecorder = dependencies.crea
     } catch (e) { if (alive.current && token === generation.current) showError(e); }
     finally { if (token === generation.current) lock.current = false; }
   }
-  async function persist(audio: { blob: Blob; mimeType: string }, token: number) {
+  function opened(draft: Pick<VoiceDraft, 'id'>) { setUnsaved(null); navigate(`/voice/${encodeURIComponent(draft.id)}`); }
+  async function persist(audio: Audio, token: number) {
     if (!loaded) return;
-    setError(''); setState('saving');
-    // Persist only; provider processing runs on the review page so an interruption never strands the audio.
-    const draft = await createService(loaded.repo).persistDraftFromAudio({ matchId, setId:loaded.setId, audio:audio.blob, mimeType:audio.mimeType });
-    if (!alive.current || token !== generation.current) return;
-    setUnsaved(null); navigate(`/voice/${encodeURIComponent(draft.id)}`);
+    setError(''); setState('saving'); timedOut.current = false;
+    let pending = saving.current;
+    if (!pending || pending.audio !== audio) {
+      // Persist only; provider processing runs on the review page so an interruption never strands the audio.
+      const entry: PendingSave = { audio, promise: createService(loaded.repo).persistDraftFromAudio({ matchId, setId:loaded.setId, audio:audio.blob, mimeType:audio.mimeType }) };
+      saving.current = pending = entry;
+      // A save that settles after the timeout still opens its draft, unless the audio was discarded meanwhile.
+      entry.promise.then(draft => { if (saving.current !== entry) return; saving.current = null; if (alive.current && timedOut.current && unsavedRef.current === audio) opened(draft); }, () => { if (saving.current === entry) saving.current = null; });
+    }
+    let cancelTimer: (() => void) | undefined;
+    const timeout = new Promise<never>((_, reject) => { cancelTimer = scheduler.schedule(() => reject({ code:'storage-timeout' }), SAVE_TIMEOUT_MS); });
+    try {
+      const draft = await Promise.race([pending.promise, timeout]);
+      if (!alive.current || token !== generation.current) return;
+      opened(draft);
+    } catch (e) {
+      if (safeCode(e) === 'storage-timeout' || timedOut.current) { timedOut.current = true; throw { code:'storage-timeout' }; }
+      throw e;
+    } finally { cancelTimer?.(); }
   }
   async function retrySave() {
     if (lock.current || !unsaved) return; lock.current = true; const token = ++generation.current;
