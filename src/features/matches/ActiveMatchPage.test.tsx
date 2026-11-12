@@ -131,3 +131,19 @@ it('lists downstream set, tie-break and game identifiers in correction confirmat
   const region = await screen.findByRole('region', { name:/affected records/i });
   expect(region).toHaveTextContent('later-set'); expect(region).toHaveTextContent('later-tie'); expect(region).toHaveTextContent('later-game'); expect(save).not.toHaveBeenCalled();
 });
+
+it.each(['update', 'delete'] as const)('shows same-set tie-break and later games before %s confirmation', async operation => {
+  const b = fixture(); b.match.format = 'openPractice'; b.sets[0].status = 'completed'; b.sets[0].tieBreakId = 'same-tie';
+  b.sets.push({ ...b.sets[0], id:'next-set', ordinal:2, status:'active', tieBreakId:null });
+  b.games = Array.from({length:12}, (_,i) => ({ id:`same-game-${i+1}`, setId:'s', ordinal:i+1, server:i % 2 ? 'opponent' : 'player', result:i % 2 ? 'lost' : 'won', score:null, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns:null, createdAt:now, updatedAt:now }));
+  b.tieBreaks = [{ id:'same-tie', setId:'s', kind:'standard', playerPoints:7, opponentPoints:5, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, createdAt:now, updatedAt:now }];
+  const { save, data } = setup(b); await screen.findByText(/Alex/);
+  if (operation === 'update') { fireEvent.click(screen.getByRole('button', { name:'Edit game 2' })); fireEvent.change(screen.getByLabelText('Result'), { target:{ value:'won' } }); fireEvent.click(screen.getByRole('button', { name:'Save game' })); }
+  else fireEvent.click(screen.getByRole('button', { name:'Delete game 2' }));
+  const region = await screen.findByRole('region', { name:/affected records/i });
+  expect(region).toHaveTextContent('same-tie');
+  for (let i = 3; i <= 12; i++) expect(region).toHaveTextContent(`same-game-${i}`);
+  expect(save).not.toHaveBeenCalled(); fireEvent.click(screen.getByRole('button', { name:'Confirm affected records' }));
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(1)); expect(data().tieBreaks).toEqual(b.tieBreaks);
+  expect(data().games.filter(g => g.id !== 'same-game-2')).toEqual(b.games.filter(g => g.id !== 'same-game-2'));
+});

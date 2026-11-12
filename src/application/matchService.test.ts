@@ -393,3 +393,22 @@ describe('review regressions', () => {
     expect(confirmed.bundle.games.slice(operation === 'delete' ? 5 : 6)).toEqual(b.games.slice(6));
   });
 });
+
+describe('same-set correction dependencies', () => {
+  it.each(['update', 'delete'] as const)('%s previews the attached tie-break and later games without writes', async operation => {
+    const deps = await setup(); const start = await startMatch({ ...input, format:'openPractice' }, deps);
+    const metrics = { netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns:null };
+    const games = Array.from({ length:12 }, (_, i) => ({ ...metrics, result:i % 2 ? 'lost' as const : 'won' as const }));
+    let before = await addGames(start.match.id, games, deps);
+    before = await completeTieBreak({ setId:before.sets[0].id, kind:'standard', playerPoints:7, opponentPoints:5, ...metrics }, deps);
+    const edited = before.games[3]; const save = vi.spyOn(deps.repository, 'saveMatchBundle');
+    const run = (confirmed = false) => operation === 'update' ? updateGame(edited.id, { result:'won' }, deps, confirmed) : deleteGame(edited.id, deps, confirmed);
+    const preview = await run();
+    expect(save).not.toHaveBeenCalled(); expect(preview.bundle).toEqual(before);
+    expect(preview.conflicts).toEqual(expect.arrayContaining([expect.objectContaining({ type:'structureInvalidated', setId:edited.setId, tieBreakId:before.tieBreaks[0].id })]));
+    for (const game of before.games.slice(4)) expect(preview.conflicts.some(c => c.gameId === game.id && (c.type === 'structureInvalidated' || c.type === 'serverChanged'))).toBe(true);
+    const result = await run(true); expect(save).toHaveBeenCalledTimes(1);
+    expect(result.bundle.sets).toEqual(before.sets); expect(result.bundle.tieBreaks).toEqual(before.tieBreaks);
+    expect(result.bundle.games.filter(g => g.id !== edited.id)).toEqual(before.games.filter(g => g.id !== edited.id));
+  });
+});

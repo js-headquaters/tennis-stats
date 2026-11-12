@@ -170,7 +170,7 @@ async function findGame(id: string, repository: TennisRepository): Promise<Match
   throw new Error('Game not found');
 }
 
-function correctionConflicts(before: MatchBundle, after: MatchBundle): GameConflict[] {
+function correctionConflicts(before: MatchBundle, after: MatchBundle, corrected: Game): GameConflict[] {
   const conflicts: GameConflict[] = [];
   const ordered = (bundle: MatchBundle) => [...bundle.games].sort((a, b) => (bundle.sets.find(s => s.id === a.setId)?.ordinal ?? 0) - (bundle.sets.find(s => s.id === b.setId)?.ordinal ?? 0) || a.ordinal - b.ordinal);
   const oldGames = ordered(before), newGames = ordered(after);
@@ -184,7 +184,8 @@ function correctionConflicts(before: MatchBundle, after: MatchBundle): GameConfl
   }
   for (const set of before.sets) {
     const prior = setEvaluation(before, set), next = setEvaluation(after, set);
-    if (set.status !== 'unfinished' && (prior.completed !== next.completed || prior.winner !== next.winner)) conflicts.push({ type: 'setOutcomeInvalidated', message: `Set ${set.ordinal} outcome changes` });
+    const outcomeChanged = prior.completed !== next.completed || prior.winner !== next.winner;
+    if (set.status !== 'unfinished' && outcomeChanged) conflicts.push({ type: 'setOutcomeInvalidated', setId: set.id, message: `Set ${set.ordinal} outcome changes` });
     if (set.status === 'completed' && prior.completed && (prior.completed !== next.completed || prior.winner !== next.winner)) {
       for (const later of before.sets.filter(item => item.ordinal > set.ordinal)) {
         conflicts.push({ type: 'structureInvalidated', setId: later.id, message: `Later set ${later.ordinal} (${later.id}) depends on set ${set.ordinal}` });
@@ -194,9 +195,18 @@ function correctionConflicts(before: MatchBundle, after: MatchBundle): GameConfl
     }
     const tie = before.tieBreaks.find(t => t.id === set.tieBreakId);
     const games = after.games.filter(g => g.setId === set.id);
+    const oldSetGames = before.games.filter(g => g.setId === set.id);
+    const eligible = (items: Game[]) => items.filter(g => g.result === 'won').length === 6 && items.filter(g => g.result === 'lost').length === 6;
+    const eligibilityChanged = tie?.kind === 'standard' && eligible(oldSetGames) !== eligible(games);
+    if (set.id === corrected.setId && (outcomeChanged || eligibilityChanged)) {
+      if (tie && !(tie.kind === 'standard' && !eligible(games))) conflicts.push({ type: 'structureInvalidated', setId: set.id, tieBreakId: tie.id, message: `Tie-break ${tie.id} in set ${set.ordinal} is affected` });
+      for (const game of oldSetGames.filter(item => item.ordinal > corrected.ordinal)) {
+        if (!conflicts.some(item => item.type === 'serverChanged' && item.gameId === game.id)) conflicts.push({ type: 'structureInvalidated', setId: set.id, gameId: game.id, message: `Later game ${game.id} in set ${set.ordinal} is affected` });
+      }
+    }
     const chronological = [...games].sort((a, b) => a.ordinal - b.ordinal);
     if (chronological.some((_, index) => index < chronological.length - 1 && evaluateSet(chronological.slice(0, index + 1), null).completed)) conflicts.push({ type: 'structureInvalidated', message: `Set ${set.ordinal} has games after it ended` });
-    if (tie?.kind === 'standard' && (games.filter(g => g.result === 'won').length !== 6 || games.filter(g => g.result === 'lost').length !== 6)) conflicts.push({ type: 'structureInvalidated', message: `Set ${set.ordinal} no longer qualifies for its tie-break` });
+    if (tie?.kind === 'standard' && !eligible(games)) conflicts.push({ type: 'structureInvalidated', setId: set.id, tieBreakId: tie.id, message: `Set ${set.ordinal} no longer qualifies for tie-break ${tie.id}` });
   }
   const evaluate = (bundle: MatchBundle) => evaluateMatch(bundle.match.format, bundle.sets.filter(s => s.status !== 'unfinished').map(s => setEvaluation(bundle, s)));
   const oldMatch = evaluate(before), newMatch = evaluate(after);
@@ -214,7 +224,7 @@ export async function updateGame(gameId: string, patch: GamePatch, { repository,
   if (game.result !== 'won' && game.result !== 'lost') throw new Error('Invalid game result');
   const valid = validateGame(game);
   if (!valid.ok) throw new Error(valid.issues.map(issue => `${issue.field}: ${issue.message}`).join('; '));
-  const conflicts = correctionConflicts(before, bundle);
+  const conflicts = correctionConflicts(before, bundle, before.games.find(item => item.id === gameId)!);
   if (conflicts.length && !confirmed) return { bundle: before, conflicts };
   bundle.match.updatedAt = game.updatedAt;
   await repository.saveMatchBundle(bundle);
@@ -225,7 +235,7 @@ export async function deleteGame(gameId: string, { repository, clock }: MatchSer
   const before = await findGame(gameId, repository);
   const bundle = structuredClone(before);
   bundle.games = bundle.games.filter(game => game.id !== gameId);
-  const conflicts = correctionConflicts(before, bundle);
+  const conflicts = correctionConflicts(before, bundle, before.games.find(item => item.id === gameId)!);
   if (conflicts.length && !confirmed) return { bundle: before, conflicts };
   bundle.match.updatedAt = clock.now();
   await repository.saveMatchBundle(bundle);
