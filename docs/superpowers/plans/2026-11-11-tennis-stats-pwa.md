@@ -614,9 +614,9 @@ Before calling the project complete:
 
 **Files:** Modify `src/infrastructure/db/repositories.ts`, `src/application/backupService.ts`, tests; extend `tests/e2e/backup-migration.spec.ts` only if cheap.
 
-- [ ] **Step 1: Failing tests** — `snapshot()`/export works in `invalid-data-version` recovery (reads only); import rejects, with a reported reason, an opponent whose `normalizedName` differs from the app's normalisation of `name`.
-- [ ] **Step 2: Implement.**
-- [ ] **Step 3: Verify and commit** — `fix: export in invalid-data-version recovery and validate opponent names`.
+- [x] **Step 1: Failing tests** — `snapshot()`/export works in `invalid-data-version` recovery (reads only); import rejects, with a reported reason, an opponent whose `normalizedName` differs from the app's normalisation of `name`.
+- [x] **Step 2: Implement.**
+- [x] **Step 3: Verify and commit** — `fix: export in invalid-data-version recovery and validate opponent names`.
 
 ### Task 22: Smoke Guide, E2E Port Constant, and Repository Hygiene (M-1, T13-#7, M-14)
 
