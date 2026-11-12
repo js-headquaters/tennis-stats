@@ -582,9 +582,9 @@ Before calling the project complete:
 
 **Files:** Modify `src/application/ports.ts`, `src/application/draftService.ts`, `src/infrastructure/ai/schemas.ts`, `openAiParser.ts`, `anthropicParser.ts`, tests.
 
-- [ ] **Step 1: Failing tests** — the parser request carries only format, current set score, game count in the current set, expected next server and the existing draft; sentinel opponent name, comments and unrelated games never appear in either provider's request body.
-- [ ] **Step 2: Implement** the projection type and adapter changes; update fakes and fixtures.
-- [ ] **Step 3: Verify and commit** — `fix: send minimal match context to the parser`.
+- [x] **Step 1: Failing tests** — the parser request carries only format, current set score, game count in the current set, expected next server and the existing draft; sentinel opponent name, comments and unrelated games never appear in either provider's request body.
+- [x] **Step 2: Implement** the projection type and adapter changes; update fakes and fixtures.
+- [x] **Step 3: Verify and commit** — `fix: send minimal match context to the parser`.
 
 ### Task 18: Settings Application Section (I-3)
 
