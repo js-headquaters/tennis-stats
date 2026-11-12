@@ -14,7 +14,9 @@
     "typecheck": "tsc -b --pretty",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "verify:pwa": "node scripts/verify-pwa.mjs",
+    "icons": "node scripts/generate-icons.mjs"
   },
   "repository": {
     "type": "git",
@@ -52,6 +54,7 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.72.2",
     "vite": "^8.3.8",
+    "vite-plugin-pwa": "2.0.0",
     "vitest": "^5.1.0"
   }
 }
