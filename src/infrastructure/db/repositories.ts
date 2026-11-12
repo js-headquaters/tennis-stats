@@ -171,8 +171,11 @@ export class IndexedDbTennisRepository implements TennisRepository {
   async snapshot(): Promise<DatabaseSnapshot> {
     return this.db.transaction('r', this.db.tables, async () => {
       // A missing row means data version 0 (as in openDatabase): a never-migrated database must stay exportable in recovery mode.
-      const dataVersion = (await this.db.metadata.get('dataVersion'))?.value ?? 0;
-      if (typeof dataVersion !== 'number') throw new Error('Invalid data version');
+      const storedDataVersion = (await this.db.metadata.get('dataVersion'))?.value;
+      // Backup files do not include this internal value. In read-only recovery, use 0 as a safe numeric placeholder so malformed
+      // version metadata cannot prevent exporting the untouched tennis records. Normal mode still fails closed if this invariant breaks.
+      const dataVersion = storedDataVersion === undefined ? 0 : typeof storedDataVersion === 'number' ? storedDataVersion : this.recoveryStatus.mode === 'readOnly' ? 0 : NaN;
+      if (!Number.isFinite(dataVersion)) throw new Error('Invalid data version');
       return { dataVersion, opponents: await this.db.opponents.toArray(), matches: await this.db.matches.toArray(), sets: await this.db.sets.toArray(), games: await this.db.games.toArray(), tieBreaks: await this.db.tieBreaks.toArray(), voiceDrafts: await this.db.drafts.toArray() };
     });
   }

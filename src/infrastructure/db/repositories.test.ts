@@ -373,13 +373,18 @@ describe('IndexedDB repository backup support', () => {
     expect(snapshot.matches).toEqual([item.match]); expect(snapshot.games).toHaveLength(2);
     expect(await db.metadata.get('dataVersion'), 'reading never writes a version row').toBeUndefined();
   });
-  it('still refuses a snapshot whose version row is not a number', async () => {
+  it('snapshots data without changing an unreadable version row in invalid-data-version recovery', async () => {
     const name = `snapshot-invalid-${crypto.randomUUID()}`;
     const db = new TennisDatabase(name); await db.open();
+    const item = bundle('a', 'completed');
+    await db.opponents.put(item.opponent); await db.matches.put(item.match); await db.sets.bulkPut(item.sets); await db.games.bulkPut(item.games); await db.tieBreaks.bulkPut(item.tieBreaks);
     await db.metadata.put({ key: 'dataVersion', value: 'two' as never });
     const repo = new IndexedDbTennisRepository(db, new Error('recovery'));
     cleanup.push(async () => { repo.close(); await indexedDBDelete(name); });
-    await expect(repo.snapshot()).rejects.toThrow('Invalid data version');
+    const snapshot = await repo.snapshot();
+    expect(snapshot.dataVersion).toBe(0);
+    expect(snapshot.matches).toEqual([item.match]); expect(snapshot.games).toHaveLength(2);
+    expect((await db.metadata.get('dataVersion'))?.value).toBe('two');
   });
   it('refuses inserts in read-only recovery mode', async () => {
     const name = `insert-recovery-${crypto.randomUUID()}`;

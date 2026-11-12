@@ -3,6 +3,7 @@ import 'fake-indexeddb/auto';
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { openDatabase } from '../infrastructure/db/database';
+import { TennisDatabase } from '../infrastructure/db/schema';
 import type { MatchBundle, VoiceDraft } from '../domain/model';
 import { applyImport, backupFileName, clearAllData, exportBackup, previewImport, previewMerge, serializeBackup, type ImportPreview } from './backupService';
 
@@ -60,6 +61,19 @@ describe('exportBackup', () => {
     const text = serializeBackup(await exportBackup(repo, clock));
     for (const forbidden of ['apiKey', 'sk-', 'endpoint', 'draft', 'recording', 'transcript', 'secret audio', 'audio/mp4', 'serviceWorker', 'provider', 'dataVersion']) expect(text).not.toContain(forbidden);
     expect(text).toContain('Windy; served well');
+  });
+  it('exports tennis records while an unreadable data version keeps the repository in read-only recovery', async () => {
+    const name = `backup-invalid-version-${crypto.randomUUID()}`;
+    const db = new TennisDatabase(name); await db.open();
+    const item = ownBundle('recoverable', 'completed');
+    await db.opponents.put(item.opponent); await db.matches.put(item.match); await db.sets.bulkPut(item.sets); await db.games.bulkPut(item.games);
+    await db.metadata.put({ key: 'dataVersion', value: 'not-a-number' as never });
+    db.close();
+    const repo = await openDatabase(name); repos.push(repo);
+    expect(repo.getRecoveryStatus()).toMatchObject({ mode: 'readOnly', diagnostics: { code: 'invalid-data-version' } });
+    const exported = await exportBackup(repo, clock);
+    expect(exported.data.matches.map(match => match.id)).toEqual(['recoverable']);
+    expect(exported.data.games.map(game => game.id)).toEqual(['recoverable-g1']);
   });
   it('names files from the injected clock date', () => {
     expect(backupFileName(clock.now())).toBe('tennis-stats-backup-v1-2026-11-12.json');
@@ -147,6 +161,15 @@ describe('previewImport', () => {
     expect(preview.remaps).toEqual([{ from: 'opp-alex-2', to: 'opp-alex', name: 'Alex' }]);
     expect(preview.records.matches.find(m => m.id === 'match-1')?.opponentId).toBe('opp-alex');
     expect(preview.records.opponents.map(o => o.id)).toEqual(['opp-alex', 'opp-sam']);
+  });
+  it('rejects an opponent whose normalizedName does not match the normalized name', () => {
+    const data = structuredClone(v1.data);
+    data.opponents[0].normalizedName = 'wrong-name';
+    const preview = ok(previewImport(JSON.stringify({ ...v1, data })));
+    const opponent = preview.rejected.find(record => record.entity === 'opponents' && record.id === 'opp-alex');
+    expect(opponent?.reasons.join(' | ')).toMatch(/normalizedName.*normalized.*name/i);
+    expect(preview.records.opponents.some(record => record.id === 'opp-alex')).toBe(false);
+    expect(preview.rejected.find(record => record.entity === 'matches' && record.id === 'match-1')?.reasons.join(' | ')).toMatch(/opponent.*rejected/i);
   });
 });
 

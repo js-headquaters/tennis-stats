@@ -189,7 +189,11 @@ function validateRecords(data: RawData, sourceVersion: 0 | 1, exportedAt: string
       const result = schemas[entity].safeParse(item);
       if (!result.success) return { index, id: field('id'), parent, value: null, reasons: describeIssues(result.error) };
       const value = result.data as TennisRecords[EntityType][number];
-      const reasons = entity === 'games' ? gameIssues(value as Game) : [];
+      const reasons = entity === 'games'
+        ? gameIssues(value as Game)
+        : entity === 'opponents' && (value as Opponent).normalizedName !== normalizeOpponentName((value as Opponent).name).toLowerCase()
+          ? ['normalizedName must equal the normalized lowercase name']
+          : [];
       return { index, id: field('id'), parent, value, reasons };
     });
   }
