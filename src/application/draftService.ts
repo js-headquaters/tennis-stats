@@ -13,6 +13,11 @@ const gameSchema = z.object({ server: z.enum(['player', 'opponent']), result: z.
 const draftSchema = z.object({ version: z.literal(1), games: z.array(gameSchema), warnings: z.array(z.string()) }).strict();
 const messages = { auth: 'Provider authentication failed.', rate: 'Provider rate limit reached.', network: 'Provider network request failed.', config: 'Provider configuration is invalid.', 'invalid-response': 'Provider returned an invalid response.', cancelled: 'Provider request was cancelled.', offline: 'Waiting for an internet connection.' } as const;
 
+export class DraftStorageError extends Error {
+  readonly code = 'storage';
+  constructor() { super('Changes could not be saved. Previously saved recordings may still be available.'); this.name = 'DraftStorageError'; }
+}
+
 export function createDraftService({ repository, transcriber, parser, clock, ids, isOnline }: Deps) {
   const busy = new Set<string>();
   function guard<T>(id: string, action: () => Promise<T>): Promise<T> {
@@ -20,9 +25,12 @@ export function createDraftService({ repository, transcriber, parser, clock, ids
     busy.add(id);
     return action().finally(() => busy.delete(id));
   }
-  async function save(draft: VoiceDraft) { const saved = { ...draft, updatedAt: clock.now() }; await repository.saveDraft(saved); return saved; }
+  async function storage<T>(operation: () => Promise<T>): Promise<T> {
+    try { return await operation(); } catch { throw new DraftStorageError(); }
+  }
+  async function save(draft: VoiceDraft) { const saved = { ...draft, updatedAt: clock.now() }; await storage(() => repository.saveDraft(saved)); return saved; }
   async function applicable(draft: Pick<VoiceDraft, 'matchId' | 'setId'>): Promise<MatchBundle> {
-    const bundle = await repository.getMatchBundle(draft.matchId);
+    const bundle = await storage(() => repository.getMatchBundle(draft.matchId));
     const set = bundle?.sets.find(item => item.id === draft.setId);
     if (!bundle || bundle.match.status !== 'active' || !set || set.matchId !== draft.matchId || set.status !== 'active' || set.kind !== 'standard') throw new Error('No active standard set for draft');
     const score = evaluateSet(bundle.games.filter(game => game.setId === set.id), bundle.tieBreaks.find(tie => tie.id === set.tieBreakId) ?? null);
@@ -30,7 +38,7 @@ export function createDraftService({ repository, transcriber, parser, clock, ids
     return bundle;
   }
   async function load(id: string) {
-    const draft = await repository.getDraft(id);
+    const draft = await storage(() => repository.getDraft(id));
     if (!draft) throw new Error('Draft not found');
     if (draft.state === 'confirming') throw new Error('Draft is confirming');
     return draft;
@@ -41,33 +49,35 @@ export function createDraftService({ repository, transcriber, parser, clock, ids
       const waiting: VoiceDraft = { ...draft, state: 'waiting-retry', error: { code: 'offline', message: messages.offline, phase } };
       return save(waiting);
     }
-    let current: VoiceDraft = { ...draft, state: 'processing', error: null };
-    await save(current);
-    try {
-      if (phase === 'transcription') {
-        if (!current.recording || !current.mimeType) throw new Error('Missing audio');
-        const transcript = await transcriber.transcribe({ audio: current.recording, mimeType: current.mimeType }, signal);
-        if (!transcript || typeof transcript.text !== 'string' || !transcript.text.trim() || typeof transcript.provider !== 'string' || typeof transcript.model !== 'string') { phase = 'transcription'; throw { code: 'invalid-response' }; }
-        current = { ...current, transcripts: [...current.transcripts, { text: transcript.text, provider: transcript.provider, model: transcript.model, timestamp: clock.now() }] };
-        await save(current);
-      }
-      phase = 'parser';
-      const transcript = current.transcripts.at(-1);
-      if (!transcript) throw { code: 'invalid-response' };
-      const response = await parser.parse({ transcript: transcript.text, matchContext: bundle, expectedNext: nextGameServer(bundle), ...(current.parsedDraft ? { existingDraft: current.parsedDraft } : {}) }, signal);
-      const validated = draftSchema.safeParse(response);
-      if (!validated.success) throw { code: 'invalid-response' };
-      current = { ...current, parsedDraft: validated.data, state: 'ready', error: null };
-    } catch (error) {
+    let current = await save({ ...draft, state: 'processing', error: null });
+    async function providerFailure(error: unknown, failedPhase: Phase) {
       let code: keyof typeof messages = 'network';
       try {
         const candidate = (error as { code?: unknown })?.code;
         if (typeof candidate === 'string' && Object.hasOwn(messages, candidate) && candidate !== 'offline') code = candidate as keyof typeof messages;
         else if (signal.aborted || (error instanceof Error && error.name === 'AbortError')) code = 'cancelled';
       } catch { /* Do not expose untrusted errors. */ }
-      current = { ...current, state: 'waiting-retry', error: { code, message: messages[code], phase } };
+      return save({ ...current, state: 'waiting-retry', error: { code, message: messages[code], phase: failedPhase } });
     }
-    return save(current);
+    if (phase === 'transcription') {
+      let transcript;
+      try {
+        if (!current.recording || !current.mimeType) throw new Error('Missing audio');
+        transcript = await transcriber.transcribe({ audio: current.recording, mimeType: current.mimeType }, signal);
+        if (!transcript || typeof transcript.text !== 'string' || !transcript.text.trim() || typeof transcript.provider !== 'string' || typeof transcript.model !== 'string') throw { code: 'invalid-response' };
+      } catch (error) { return providerFailure(error, 'transcription'); }
+      current = await save({ ...current, transcripts: [...current.transcripts, { text: transcript.text, provider: transcript.provider, model: transcript.model, timestamp: clock.now() }] });
+    }
+    let parsed;
+    try {
+      const transcript = current.transcripts.at(-1);
+      if (!transcript) throw { code: 'invalid-response' };
+      const response = await parser.parse({ transcript: transcript.text, matchContext: bundle, expectedNext: nextGameServer(bundle), ...(current.parsedDraft ? { existingDraft: current.parsedDraft } : {}) }, signal);
+      const validated = draftSchema.safeParse(response);
+      if (!validated.success) throw { code: 'invalid-response' };
+      parsed = validated.data;
+    } catch (error) { return providerFailure(error, 'parser'); }
+    return save({ ...current, parsedDraft: parsed, state: 'ready', error: null });
   }
   function createDraftFromAudio(input: AudioInput & { matchId: string; setId: string }, signal: AbortSignal) {
     const now = clock.now();
@@ -89,7 +99,7 @@ export function createDraftService({ repository, transcriber, parser, clock, ids
       if (!valid.success || !validateGame({ ...game, id: draft.id, setId: draft.setId, ordinal: index + 1, score: null, createdAt: draft.createdAt, updatedAt: draft.updatedAt }).ok) throw new Error('Invalid draft game edit');
       const games = [...draft.parsedDraft.games]; games[index] = game;
       const next = { ...draft, parsedDraft: { ...draft.parsedDraft, games }, updatedAt: clock.now() };
-      await repository.saveDraft(next); return next;
+      await storage(() => repository.saveDraft(next)); return next;
     });
   }
   return { createDraftFromAudio, retryDraft, refineDraftWithAudio, updateDraftGame };

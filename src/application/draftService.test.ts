@@ -131,4 +131,52 @@ describe('draft processing', () => {
     release();
     expect((await running).parsedDraft?.warnings).toEqual(['new']);
   });
+  it.each(['processing', 'transcript', 'ready', 'failure'] as const)('surfaces a safe storage error on the %s save without claiming uncommitted data', async boundary => {
+    const { service, match, repository, parser, transcriber, parsed } = await setup();
+    const signal = new AbortController().signal;
+    const initial = await service.createDraftFromAudio({ matchId: match.match.id, setId: match.sets[0].id, audio: new Blob(['old']), mimeType: 'audio/mp4' }, signal);
+    const realSave = repository.saveDraft.bind(repository);
+    let attempts = 0;
+    const save = vi.spyOn(repository, 'saveDraft').mockImplementation(async draft => {
+      attempts++;
+      const failing = boundary === 'processing' ? draft.state === 'processing'
+        : boundary === 'transcript' ? draft.state === 'processing' && draft.transcripts.length === 2
+        : boundary === 'ready' ? draft.state === 'ready'
+        : draft.state === 'waiting-retry';
+      if (failing) throw new Error('STORAGE_SECRET https://secret.invalid');
+      return realSave(draft);
+    });
+    if (boundary === 'failure') transcriber.transcribe.mockRejectedValueOnce({ code: 'rate', message: 'PROVIDER_SECRET' });
+    else parser.parse.mockResolvedValueOnce({ ...parsed, warnings: ['new'] });
+    const operation = service.refineDraftWithAudio(initial.id, { audio: new Blob(['new']), mimeType: 'audio/aac' }, signal);
+    const error = await operation.catch(value => value as Error & { code?: string });
+    expect(error).toMatchObject({ code: 'storage', message: 'Changes could not be saved. Previously saved recordings may still be available.' });
+    expect(String(error)).not.toContain('STORAGE_SECRET');
+    const persisted = await repository.getDraft(initial.id);
+    expect(await persisted?.recording?.text()).toBe('new');
+    expect(persisted?.parsedDraft).toEqual(parsed);
+    expect(persisted?.transcripts).toHaveLength(boundary === 'ready' ? 2 : 1);
+    expect(persisted?.state).toBe(boundary === 'processing' ? 'recorded' : 'processing');
+    expect(attempts).toBe(boundary === 'processing' ? 2 : boundary === 'ready' ? 4 : 3);
+    save.mockRestore();
+  });
+  it('persists a safe provider rate failure when storage succeeds', async () => {
+    const { service, match, transcriber, repository } = await setup();
+    transcriber.transcribe.mockRejectedValueOnce({ code: 'rate', message: 'PROVIDER_SECRET' });
+    const draft = await service.createDraftFromAudio({ matchId: match.match.id, setId: match.sets[0].id, audio: new Blob(['a']), mimeType: 'audio/mp4' }, new AbortController().signal);
+    expect(draft.error).toEqual({ code: 'rate', message: 'Provider rate limit reached.', phase: 'transcription' });
+    expect(await repository.getDraft(draft.id)).toEqual(draft);
+  });
+  it('retains the previous recording and parse when the new recording cannot be saved', async () => {
+    const { service, match, repository, transcriber, parsed } = await setup();
+    const signal = new AbortController().signal;
+    const initial = await service.createDraftFromAudio({ matchId: match.match.id, setId: match.sets[0].id, audio: new Blob(['old']), mimeType: 'audio/mp4' }, signal);
+    vi.spyOn(repository, 'saveDraft').mockRejectedValueOnce(new Error('STORAGE_SECRET'));
+    await expect(service.refineDraftWithAudio(initial.id, { audio: new Blob(['new']), mimeType: 'audio/aac' }, signal)).rejects.toMatchObject({ code: 'storage' });
+    const persisted = await repository.getDraft(initial.id);
+    expect(await persisted?.recording?.text()).toBe('old');
+    expect(persisted?.parsedDraft).toEqual(parsed);
+    expect(persisted?.state).toBe('ready');
+    expect(transcriber.transcribe).toHaveBeenCalledTimes(1);
+  });
 });
