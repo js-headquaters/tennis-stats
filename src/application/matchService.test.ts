@@ -361,3 +361,35 @@ describe('match services', () => {
     expect(await deps.repository.listMatches()).toHaveLength(1);
   });
 });
+
+describe('review regressions', () => {
+  const metrics = { netErrors: null, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null };
+  it.each(['player', 'opponent'] as const)('infers service after multiple standard tie-breaks starting with %s', async firstServer => {
+    const deps = await setup(); const start = await startMatch({ ...input, firstServer, format: 'openPractice' }, deps);
+    const games = Array.from({ length: 12 }, (_, i) => ({ ...metrics, result: i % 2 ? 'lost' as const : 'won' as const }));
+    let b = await addGames(start.match.id, games, deps);
+    await completeTieBreak({ setId: b.sets[0].id, kind: 'standard', playerPoints: 7, opponentPoints: 5, ...metrics }, deps);
+    const opposite = firstServer === 'player' ? 'opponent' : 'player';
+    b = await addGames(start.match.id, games, deps);
+    expect(b.games[12].server).toBe(opposite);
+    await completeTieBreak({ setId: b.sets[1].id, kind: 'standard', playerPoints: 7, opponentPoints: 5, ...metrics }, deps);
+    b = await addGames(start.match.id, [{ ...metrics, result: 'won' }], deps);
+    expect(b.games[24].server).toBe(firstServer);
+  });
+  it.each(['update', 'delete'] as const)('%s preview identifies all dependent records and confirmation preserves them', async operation => {
+    const deps = await setup(); const start = await startMatch({ ...input, format: 'openPractice' }, deps);
+    let b = await addGames(start.match.id, Array.from({ length: 6 }, () => ({ ...metrics, result: 'won' as const })), deps);
+    b = await addGames(start.match.id, Array.from({ length: 12 }, (_, i) => ({ ...metrics, result: i % 2 ? 'lost' as const : 'won' as const })), deps);
+    b = await completeTieBreak({ setId: b.sets[1].id, kind:'standard', playerPoints:7, opponentPoints:5, ...metrics }, deps);
+    b = await addGames(start.match.id, [{ ...metrics, result:'won' }], deps);
+    const save = vi.spyOn(deps.repository, 'saveMatchBundle');
+    const run = (confirmed = false) => operation === 'update' ? updateGame(b.games[0].id, { result:'lost' }, deps, confirmed) : deleteGame(b.games[0].id, deps, confirmed);
+    const preview = await run(); expect(save).not.toHaveBeenCalled();
+    for (const set of b.sets.slice(1)) expect(preview.conflicts).toEqual(expect.arrayContaining([expect.objectContaining({ type:'structureInvalidated', setId:set.id })]));
+    expect(preview.conflicts).toEqual(expect.arrayContaining([expect.objectContaining({ type:'structureInvalidated', tieBreakId:b.tieBreaks[0].id })]));
+    for (const game of b.games.slice(6)) expect(preview.conflicts).toEqual(expect.arrayContaining([expect.objectContaining({ type:'structureInvalidated', gameId:game.id })]));
+    const confirmed = await run(true); expect(save).toHaveBeenCalledTimes(1);
+    expect(confirmed.bundle.sets).toEqual(b.sets); expect(confirmed.bundle.tieBreaks).toEqual(b.tieBreaks);
+    expect(confirmed.bundle.games.slice(operation === 'delete' ? 5 : 6)).toEqual(b.games.slice(6));
+  });
+});

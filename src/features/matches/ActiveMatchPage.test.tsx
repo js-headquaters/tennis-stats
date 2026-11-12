@@ -1,10 +1,11 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { createMemoryRouter, MemoryRouter, Route, RouterProvider, Routes } from 'react-router-dom';
 import { expect, it, vi } from 'vitest';
 import type { MatchServiceDeps } from '../../application/matchService';
 import type { TennisRepository } from '../../application/ports';
 import type { MatchBundle } from '../../domain/model';
 import ActiveMatchPage from './ActiveMatchPage';
+import { dependencies } from '../../app/dependencies';
 
 const now = '2026-01-01T00:00:00.000Z';
 function fixture(): MatchBundle { return { opponent: { id:'o', name:'Alex', normalizedName:'alex', createdAt:now, updatedAt:now }, match: { id:'m', opponentId:'o', playedAt:now, format:'oneSet', firstServer:'player', status:'active', comments:null, createdAt:now, updatedAt:now }, sets:[{ id:'s', matchId:'m', ordinal:1, kind:'standard', status:'active', tieBreakId:null, createdAt:now, updatedAt:now }], games:[], tieBreaks:[] }; }
@@ -87,4 +88,46 @@ it('shows a not-found state with retry', async () => {
   const deps: MatchServiceDeps = { repository: { getMatchBundle:async () => undefined, close:vi.fn() } as unknown as TennisRepository, clock:{ now:() => now }, ids:{ next:() => 'id' } };
   render(<MemoryRouter initialEntries={['/matches/m/live']}><Routes><Route path="/matches/:matchId/live" element={<ActiveMatchPage deps={deps} />} /></Routes></MemoryRouter>);
   expect(await screen.findByRole('alert')).toHaveTextContent('Match not found'); expect(screen.getByRole('button', { name:'Retry' })).toBeInTheDocument();
+});
+
+it('shows the correct next server after a standard tie-break', async () => {
+  const b = fixture(); b.match.format = 'openPractice'; b.sets[0].status = 'completed'; b.sets[0].tieBreakId = 'tb';
+  b.sets.push({ ...b.sets[0], id:'s2', ordinal:2, status:'active', tieBreakId:null });
+  b.games = Array.from({length:12}, (_,i) => ({ id:`game${i}`, setId:'s', ordinal:i+1, server:i % 2 ? 'opponent' : 'player', result:i % 2 ? 'lost' : 'won', score:null, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns:null, createdAt:now, updatedAt:now }));
+  b.tieBreaks = [{ id:'tb', setId:'s', kind:'standard', playerPoints:7, opponentPoints:5, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, createdAt:now, updatedAt:now }];
+  setup(b); expect(await screen.findByText(/next server: opponent/i)).toBeInTheDocument();
+});
+
+it('hides the previous match while a new route loads', async () => {
+  const first = fixture(); const second = fixture(); second.match.id = 'new'; second.opponent.name = 'Blair';
+  let resolve!: (b: MatchBundle) => void; const deferred = new Promise<MatchBundle>(r => { resolve = r; });
+  const save = vi.fn(); const get = vi.fn((id: string) => id === 'm' ? Promise.resolve(first) : deferred);
+  const deps: MatchServiceDeps = { repository: { getMatchBundle:get, saveMatchBundle:save, close:vi.fn() } as unknown as TennisRepository, clock:{ now:() => now }, ids:{ next:() => 'id' } };
+  const router = createMemoryRouter([{ path:'/matches/:matchId/live', element:<ActiveMatchPage deps={deps} /> }], { initialEntries:['/matches/m/live'] });
+  render(<RouterProvider router={router} />); await screen.findByText(/Alex/);
+  await act(async () => { await router.navigate('/matches/new/live'); });
+  expect(screen.queryByText(/Alex/)).not.toBeInTheDocument(); expect(screen.queryByRole('button', { name:'Save comments' })).not.toBeInTheDocument(); expect(save).not.toHaveBeenCalled();
+  await act(async () => { resolve(second); }); expect(await screen.findByText(/Blair/)).toBeInTheDocument();
+});
+it('closes each owned repository once on failed load and retry, but not injected repositories', async () => {
+  const failed = { getMatchBundle:vi.fn().mockRejectedValue(new Error('offline')), close:vi.fn() };
+  const success = { getMatchBundle:vi.fn().mockResolvedValue(fixture()), close:vi.fn() };
+  const open = vi.spyOn(dependencies, 'openDatabase').mockResolvedValueOnce(failed as never).mockResolvedValueOnce(success as never);
+  const view = render(<MemoryRouter initialEntries={['/matches/m/live']}><Routes><Route path="/matches/:matchId/live" element={<ActiveMatchPage />} /></Routes></MemoryRouter>);
+  expect(await screen.findByRole('alert')).toHaveTextContent('offline'); expect(failed.close).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name:'Retry' })); await screen.findByText(/Alex/); expect(failed.close).toHaveBeenCalledTimes(1);
+  view.unmount(); expect(success.close).toHaveBeenCalledTimes(1); expect(failed.close).toHaveBeenCalledTimes(1); open.mockRestore();
+  const injected = { getMatchBundle:vi.fn().mockRejectedValue(new Error('offline')), close:vi.fn() };
+  const deps: MatchServiceDeps = { repository:injected as unknown as TennisRepository, clock:{ now:() => now }, ids:{ next:() => 'id' } };
+  const another = render(<MemoryRouter initialEntries={['/matches/m/live']}><Routes><Route path="/matches/:matchId/live" element={<ActiveMatchPage deps={deps} />} /></Routes></MemoryRouter>);
+  await screen.findByRole('alert'); another.unmount(); expect(injected.close).not.toHaveBeenCalled();
+});
+it('lists downstream set, tie-break and game identifiers in correction confirmation', async () => {
+  const b = fixture(); b.match.format = 'openPractice'; b.sets[0].status = 'completed';
+  b.sets.push({ ...b.sets[0], id:'later-set', ordinal:2, tieBreakId:'later-tie' });
+  b.games = [...Array.from({length:6}, (_,i) => ({ id:`first${i}`, setId:'s', ordinal:i+1, server:i % 2 ? 'opponent' as const : 'player' as const, result:'won' as const, score:null, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns:null, createdAt:now, updatedAt:now })), { id:'later-game', setId:'later-set', ordinal:1, server:'player', result:'won', score:null, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns:null, createdAt:now, updatedAt:now }];
+  b.tieBreaks = [{ id:'later-tie', setId:'later-set', kind:'standard', playerPoints:7, opponentPoints:5, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, createdAt:now, updatedAt:now }];
+  const { save } = setup(b); await screen.findByText(/Alex/); fireEvent.click(screen.getAllByRole('button', { name:'Delete game 1' })[1]);
+  const region = await screen.findByRole('region', { name:/affected records/i });
+  expect(region).toHaveTextContent('later-set'); expect(region).toHaveTextContent('later-tie'); expect(region).toHaveTextContent('later-game'); expect(save).not.toHaveBeenCalled();
 });

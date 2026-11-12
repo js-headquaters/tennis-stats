@@ -33,6 +33,17 @@ export async function abandonActiveMatch(id: string, { repository, clock }: Matc
   await repository.abandonMatch(id, clock.now());
 }
 
+export function nextGameServer(bundle: MatchBundle): Server {
+  const orderedSets = [...bundle.sets].sort((a, b) => a.ordinal - b.ordinal);
+  let next = bundle.match.firstServer;
+  for (const set of orderedSets) {
+    const games = bundle.games.filter(game => game.setId === set.id).sort((a, b) => a.ordinal - b.ordinal);
+    for (const game of games) next = inferServer(game.server, 1);
+    if (set.status === 'completed' && bundle.tieBreaks.some(t => t.id === set.tieBreakId && t.kind === 'standard')) next = inferServer(next, 1);
+  }
+  return next;
+}
+
 export type GameInput = Pick<Game, 'result' | 'netErrors' | 'wideErrors' | 'longErrors' | 'doubleFaults' | 'failedReturns'> & { server?: Server; score?: Game['score'] };
 
 function setEvaluation(bundle: MatchBundle, set: TennisSet) {
@@ -62,8 +73,7 @@ export async function addGames(matchId: string, inputs: GameInput[], { repositor
     const score = setEvaluation(bundle, set);
     if (score.playerGames === 6 && score.opponentGames === 6) throw new Error('Complete the tie-break before adding games');
     const existing = bundle.games.filter(game => game.setId === set.id);
-    const last = [...bundle.games].sort((a, b) => (bundle.sets.find(s => s.id === b.setId)?.ordinal ?? 0) - (bundle.sets.find(s => s.id === a.setId)?.ordinal ?? 0) || b.ordinal - a.ordinal)[0];
-    const game: Game = { ...input, id: ids.next(), setId: set.id, ordinal: Math.max(0, ...existing.map(item => item.ordinal)) + 1, server: input.server ?? (last ? inferServer(last.server, 1) : bundle.match.firstServer), score: input.score ?? null, createdAt: now, updatedAt: now };
+    const game: Game = { ...input, id: ids.next(), setId: set.id, ordinal: Math.max(0, ...existing.map(item => item.ordinal)) + 1, server: input.server ?? nextGameServer(bundle), score: input.score ?? null, createdAt: now, updatedAt: now };
     if (game.result !== 'won' && game.result !== 'lost') throw new Error('Choose whether the game was won or lost');
     const valid = validateGame(game);
     if (!valid.ok) throw new Error(valid.issues.map(issue => `${issue.field}: ${issue.message}`).join('; '));
@@ -150,7 +160,7 @@ export async function updateComments(id: string, comments: string | null, { repo
 }
 
 export type GamePatch = Partial<Pick<Game, 'server' | 'result' | 'score' | 'netErrors' | 'wideErrors' | 'longErrors' | 'doubleFaults' | 'failedReturns'>>;
-export interface GameConflict { type: 'serverChanged' | 'setOutcomeInvalidated' | 'structureInvalidated' | 'matchOutcomeInvalidated'; message: string; gameId?: string }
+export interface GameConflict { type: 'serverChanged' | 'setOutcomeInvalidated' | 'structureInvalidated' | 'matchOutcomeInvalidated'; message: string; gameId?: string; setId?: string; tieBreakId?: string }
 
 async function findGame(id: string, repository: TennisRepository): Promise<MatchBundle> {
   for (const match of await repository.listMatches()) {
@@ -175,6 +185,13 @@ function correctionConflicts(before: MatchBundle, after: MatchBundle): GameConfl
   for (const set of before.sets) {
     const prior = setEvaluation(before, set), next = setEvaluation(after, set);
     if (set.status !== 'unfinished' && (prior.completed !== next.completed || prior.winner !== next.winner)) conflicts.push({ type: 'setOutcomeInvalidated', message: `Set ${set.ordinal} outcome changes` });
+    if (set.status === 'completed' && prior.completed && (prior.completed !== next.completed || prior.winner !== next.winner)) {
+      for (const later of before.sets.filter(item => item.ordinal > set.ordinal)) {
+        conflicts.push({ type: 'structureInvalidated', setId: later.id, message: `Later set ${later.ordinal} (${later.id}) depends on set ${set.ordinal}` });
+        for (const tie of before.tieBreaks.filter(item => item.setId === later.id)) conflicts.push({ type: 'structureInvalidated', setId: later.id, tieBreakId: tie.id, message: `Later tie-break ${tie.id} in set ${later.ordinal} is affected` });
+        for (const game of before.games.filter(item => item.setId === later.id)) conflicts.push({ type: 'structureInvalidated', setId: later.id, gameId: game.id, message: `Later game ${game.id} in set ${later.ordinal} is affected` });
+      }
+    }
     const tie = before.tieBreaks.find(t => t.id === set.tieBreakId);
     const games = after.games.filter(g => g.setId === set.id);
     const chronological = [...games].sort((a, b) => a.ordinal - b.ordinal);
