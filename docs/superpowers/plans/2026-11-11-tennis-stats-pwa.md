@@ -590,9 +590,9 @@ Before calling the project complete:
 
 **Files:** Create `src/features/settings/ApplicationSection.tsx` (+ test); modify `SettingsPage.tsx`.
 
-- [ ] **Step 1: Failing tests** — read-only section showing app version, data/schema version, online/offline state, installed/standalone state, and service-worker/offline-ready state when available; injectable sources; independent of the Settings busy lock; no secrets.
-- [ ] **Step 2: Implement and wire into SettingsPage.**
-- [ ] **Step 3: Verify and commit** — `feat: show application status in settings`.
+- [x] **Step 1: Failing tests** — read-only section showing app version, data/schema version, online/offline state, installed/standalone state, and service-worker/offline-ready state when available; injectable sources; independent of the Settings busy lock; no secrets.
+- [x] **Step 2: Implement and wire into SettingsPage.**
+- [x] **Step 3: Verify and commit** — `feat: show application status in settings`.
 
 ### Task 19: Finalise Sets Completed by Corrections (M-10)
 
