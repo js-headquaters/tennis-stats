@@ -361,6 +361,26 @@ describe('IndexedDB repository backup support', () => {
     await expect(repo.insertRecords(make())).rejects.toThrow();
     expect(await repo.snapshot()).toEqual(before);
   });
+  it('snapshots a never-migrated (data version 0, no version row) database in recovery mode, so it can still be exported', async () => {
+    const name = `snapshot-recovery-${crypto.randomUUID()}`;
+    const db = new TennisDatabase(name); await db.open();
+    const item = bundle('a', 'completed');
+    await db.opponents.put(item.opponent); await db.matches.put(item.match); await db.sets.bulkPut(item.sets); await db.games.bulkPut(item.games); await db.tieBreaks.bulkPut(item.tieBreaks);
+    const repo = new IndexedDbTennisRepository(db, new Error('migration failed'));
+    cleanup.push(async () => { repo.close(); await indexedDBDelete(name); });
+    const snapshot = await repo.snapshot();
+    expect(snapshot.dataVersion).toBe(0);
+    expect(snapshot.matches).toEqual([item.match]); expect(snapshot.games).toHaveLength(2);
+    expect(await db.metadata.get('dataVersion'), 'reading never writes a version row').toBeUndefined();
+  });
+  it('still refuses a snapshot whose version row is not a number', async () => {
+    const name = `snapshot-invalid-${crypto.randomUUID()}`;
+    const db = new TennisDatabase(name); await db.open();
+    await db.metadata.put({ key: 'dataVersion', value: 'two' as never });
+    const repo = new IndexedDbTennisRepository(db, new Error('recovery'));
+    cleanup.push(async () => { repo.close(); await indexedDBDelete(name); });
+    await expect(repo.snapshot()).rejects.toThrow('Invalid data version');
+  });
   it('refuses inserts in read-only recovery mode', async () => {
     const name = `insert-recovery-${crypto.randomUUID()}`;
     const db = new TennisDatabase(name); await db.open();
