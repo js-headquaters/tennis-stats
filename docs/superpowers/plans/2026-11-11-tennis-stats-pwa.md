@@ -254,27 +254,27 @@ Run `npm test -- src/application/matchService.test.ts src/features/matches/Start
 **Interfaces:**
 - Produces: `AiSettingsStore` with `getTranscription()`, `saveTranscription()`, `getParser()`, `saveParser()`, `clear(kind)`; `TranscriptionProvider.transcribe(request, signal): Promise<Transcript>`; `StatisticsParser.parse(request, signal): Promise<ParsedDraft>`; `redactProviderError(error): SafeProviderError`.
 
-- [ ] **Step 1: Write failing settings tests**
+- [x] **Step 1: Write failing settings tests**
 
 Assert transcription and parser settings save independently, masked inputs do not overwrite an unchanged key, clearing one leaves the other, and serialization/export helpers never include keys.
 
-- [ ] **Step 2: Write failing provider contract tests**
+- [x] **Step 2: Write failing provider contract tests**
 
 Mock fetch and assert OpenAI multipart transcription, OpenAI structured parser output, Anthropic structured parser output, Zod rejection of malformed/negative/cross-field-invalid drafts, cancellation, and safe mapping of auth/rate/network failures.
 
-- [ ] **Step 3: Add secret-leak regression tests**
+- [x] **Step 3: Add secret-leak regression tests**
 
 Use a sentinel key and assert it is absent from thrown messages, `JSON.stringify` diagnostics, rendered Settings errors, and intercepted console calls.
 
-- [ ] **Step 4: Run tests and verify failure**
+- [x] **Step 4: Run tests and verify failure**
 
 Run `npm test -- src/infrastructure/settings src/infrastructure/ai src/features/settings/SettingsPage.test.tsx`; expect failures.
 
-- [ ] **Step 5: Implement adapters and Settings UI**
+- [x] **Step 5: Implement adapters and Settings UI**
 
 Default transcription to current OpenAI `gpt-transcribe`; keep model and endpoint editable. Support OpenAI and Anthropic parser adapters, “Test connection,” clear-key actions, and the exact client-key risk warning from the spec.
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 Run targeted tests, `npm run typecheck`, and `npm run lint`; then commit `feat: configure replaceable ai providers`.
 
