@@ -359,23 +359,23 @@ Run targeted tests, type checking, and linting; commit `feat: add reviewed voice
 **Interfaces:**
 - Produces: `getCalendarPeriod(reference: Date, unit: "week" | "month"): DateRange`; `calculateMetric(games, key): MetricSummary`; `calculateDashboard(current, previous): DashboardSummary`.
 
-- [ ] **Step 1: Write failing statistics tests**
+- [x] **Step 1: Write failing statistics tests**
 
 Use timezone-safe fixtures to assert Monday–Sunday weeks, calendar-month boundaries, previous-equivalent periods, match `playedAt` inclusion, per-metric known-value denominators, explicit-zero inclusion, tie-break exclusion, and failed-return denominator restricted to known return games.
 
-- [ ] **Step 2: Write failing dashboard tests**
+- [x] **Step 2: Write failing dashboard tests**
 
 Assert week/month navigation, current-versus-previous trend text, sample sizes, net/wide/long/double-fault averages, failed returns per return game, recent matches, active resume, and no raw totals.
 
-- [ ] **Step 3: Run tests and verify failure**
+- [x] **Step 3: Run tests and verify failure**
 
 Run `npm test -- src/domain/statistics.test.ts src/features/dashboard`; expect failures.
 
-- [ ] **Step 4: Implement pure statistics and statistics-first UI**
+- [x] **Step 4: Implement pure statistics and statistics-first UI**
 
 Use Recharts behind `TrendChart`; include a text equivalent for every visualization and avoid implying improvement when either comparison period has no sample.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run targeted tests plus type checking/linting; commit `feat: show calendar tennis trends`.
 
