@@ -15,7 +15,7 @@ export function validateGame(input: Game): ValidationResult<Game> {
   if (input.score !== null && (!input.score || typeof input.score !== 'object' || !allowedPoints.includes(input.score.player) || !allowedPoints.includes(input.score.opponent))) {
     issues.push({ field: 'score', message: "Must be null or a pair of allowed score strings ('0', '15', '30', '40', 'AD')" });
   }
-  for (const field of ['firstServesIn', 'firstServesTotal', 'secondServesIn', 'secondServesTotal', 'aces', 'doubleFaults', 'winners', 'unforcedErrors', 'failedReturns'] as const) {
+  for (const field of ['netErrors', 'wideErrors', 'longErrors', 'doubleFaults', 'failedReturns'] as const) {
     const value = input[field];
     if (value !== null && (!Number.isInteger(value) || value < 0)) issues.push({ field, message: 'Must be a non-negative integer or null' });
   }

@@ -1,13 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import type { Game } from './model';
+import type { Game, MatchFormat, MatchStatus, TennisSet, TieBreak } from './model';
 import { normalizeOpponentName, validateGame } from './validation';
 
 const game = (overrides: Partial<Game> = {}): Game => ({
-  id: 'game-1', setId: 'set-1', ordinal: 1, server: 'player',
-  score: null, firstServesIn: 0, firstServesTotal: null,
-  secondServesIn: null, secondServesTotal: null, aces: null,
-  doubleFaults: null, winners: null, unforcedErrors: null,
-  failedReturns: null, createdAt: '2026-11-11T00:00:00.000Z',
+  id: 'game-1', setId: 'set-1', ordinal: 1, server: 'player', result: 'won',
+  score: null, netErrors: 0, wideErrors: null, longErrors: null,
+  doubleFaults: null, failedReturns: null, createdAt: '2026-11-11T00:00:00.000Z',
   updatedAt: '2026-11-11T00:00:00.000Z', ...overrides,
 });
 
@@ -23,7 +21,27 @@ describe('domain validation', () => {
   });
 
   it.each([-1, 1.5])('rejects invalid metric count %s', (count) => {
-    expect(validateGame(game({ aces: count }))).toMatchObject({ ok: false });
+    expect(validateGame(game({ netErrors: count }))).toMatchObject({ ok: false });
+  });
+
+  it('pins the exact match formats and statuses', () => {
+    const formats: MatchFormat[] = ['twoSetsSuperTiebreak', 'openPractice', 'oneSet', 'bestOfThree'];
+    const statuses: MatchStatus[] = ['active', 'completed', 'abandoned'];
+    expect(formats).toHaveLength(4);
+    expect(statuses).toHaveLength(3);
+  });
+
+  it('pins required game result and five tracked metrics', () => {
+    const input = game({ result: 'lost', netErrors: 0, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null });
+    expect(validateGame(input)).toEqual({ ok: true, value: input });
+    expect(Object.keys(input).filter((key) => ['netErrors', 'wideErrors', 'longErrors', 'doubleFaults', 'failedReturns'].includes(key))).toHaveLength(5);
+  });
+
+  it('pins set and tie-break domain values', () => {
+    const set = { kind: 'decidingSuperTiebreak', status: 'unfinished' } satisfies Pick<TennisSet, 'kind' | 'status'>;
+    const tieBreak = { kind: 'super', netErrors: null, wideErrors: null, longErrors: null, doubleFaults: 0 } satisfies Pick<TieBreak, 'kind' | 'netErrors' | 'wideErrors' | 'longErrors' | 'doubleFaults'>;
+    expect(set.kind).toBe('decidingSuperTiebreak');
+    expect(tieBreak.doubleFaults).toBe(0);
   });
 
   it.each(['unknown', '', null])('rejects invalid server %s', (server) => {

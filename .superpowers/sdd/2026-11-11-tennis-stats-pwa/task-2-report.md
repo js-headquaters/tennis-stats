@@ -42,3 +42,29 @@
 ### Self-review
 - Validation enforces exactly the reviewed Game field invariants, including allowed boundary ordinal zero and allowed score point strings. Unknown servers now fail validation, preventing them from bypassing service-dependent rules.
 - No scoring consistency logic or unrelated model, persistence, or UI changes were added. No concerns identified.
+
+## Fix round 2
+
+### Exact model corrections
+- `MatchFormat` is now exactly `twoSetsSuperTiebreak | openPractice | oneSet | bestOfThree`; `MatchStatus` is exactly `active | completed | abandoned`.
+- `RecordedMetric` and `Game` now contain only `netErrors`, `wideErrors`, `longErrors`, `doubleFaults`, and `failedReturns` (all nullable numbers). `Game.result` is required as `won | lost`.
+- `Opponent` includes `name` and `normalizedName`; `Match` includes opponent, played timestamp, exact format, first server, status, nullable comments and persisted timestamps. `TennisSet` models ordinal/kind/status/tie-break relation without duplicated scores. `TieBreak` models kind, final points and nullable error aggregates without ordinal.
+- Kept `VoiceDraft`, `MatchBundle`, and `DatabaseSnapshot` minimal; snapshot and draft retain numeric `dataVersion`.
+- Updated `validateGame` to validate only the exact five metrics while preserving runtime server, ordinal, score, and service-specific checks.
+
+### TDD and verification
+- RED: `npm test -- src/domain/validation.test.ts` — 1 file failed, 4 tests failed / 17 passed; validator rejected valid new-form fixtures because it still checked removed metrics. This exposed the model/validator mismatch.
+- GREEN targeted: `npm test -- src/domain/validation.test.ts` — 1 file, 21 tests passed.
+- `npm run typecheck` — passed.
+- `npm test` — 2 files, 23 tests passed.
+- `npm run lint` — passed.
+
+### Files changed
+- `src/domain/model.ts`
+- `src/domain/validation.ts`
+- `src/domain/validation.test.ts`
+- `.superpowers/sdd/2026-11-11-tennis-stats-pwa/task-2-report.md`
+
+### Self-review
+- Type-level fixtures pin exact match format/status unions, Game result, set kind/status unions, tie-break kinds and metric fields. Runtime fixture asserts only the five tracked Game metrics. Explicit zero values and prior runtime checks remain covered.
+- No scoring implementation, persistence, or UI added. No concerns identified.
