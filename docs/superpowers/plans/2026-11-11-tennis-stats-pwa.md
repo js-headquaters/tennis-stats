@@ -124,23 +124,23 @@ Run `git add . && git commit -m "chore: bootstrap tennis stats pwa"`.
 **Interfaces:**
 - Produces: `Opponent`, `Match`, `TennisSet`, `Game`, `TieBreak`, `VoiceDraft`, `MatchBundle`, `DatabaseSnapshot`, `RecordedMetric`, `Server`, `MatchFormat`, `MatchStatus`, `ValidationResult<T> = { ok: true; value: T } | { ok: false; issues: ValidationIssue[] }`; `validateGame(input: Game): ValidationResult<Game>` and `normalizeOpponentName(name: string): string`.
 
-- [ ] **Step 1: Write failing domain validation tests**
+- [x] **Step 1: Write failing domain validation tests**
 
 Cover stable IDs/timestamps, trimmed non-empty opponent names, integer-or-null metrics, explicit preservation of `0`, rejection of negative/fractional counts, rejection of `failedReturns` in a player service game, and rejection of `doubleFaults` in an opponent service game.
 
-- [ ] **Step 2: Run the tests and verify failure**
+- [x] **Step 2: Run the tests and verify failure**
 
 Run `npm test -- src/domain/validation.test.ts`; expect missing model/validator failures.
 
-- [ ] **Step 3: Implement the exact domain types and validators**
+- [x] **Step 3: Implement the exact domain types and validators**
 
 Use string IDs and ISO timestamp strings. Store ordered relationships with `ordinal` fields rather than duplicated arrays on parent records; keep optional game score as `{ player: "0" | "15" | "30" | "40" | "AD"; opponent: same } | null` and all five statistics as `number | null`.
 
-- [ ] **Step 4: Verify domain tests and type checking**
+- [x] **Step 4: Verify domain tests and type checking**
 
 Run `npm test -- src/domain/validation.test.ts && npm run typecheck`; expect all checks to pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run `git add src/domain && git commit -m "feat: define tennis domain model"`.
 
