@@ -16,6 +16,9 @@ it('shows a prominent resume card and keeps the start action when a match is act
   render(<MemoryRouter><DashboardPage /></MemoryRouter>);
 
   const card = await screen.findByRole('region', { name: 'Active match' });
+  const statistics = screen.getByRole('region', { name: 'Statistics' });
+  expect(within(statistics).getByRole('heading', { name: 'Statistics' })).toBeInTheDocument();
+  expect(statistics.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(within(card).getByRole('heading', { name: 'Match in progress' })).toBeInTheDocument();
   expect(within(card).getByText('Against Alex')).toBeInTheDocument();
   expect(within(card).getByRole('link', { name: 'Resume match' })).toHaveAttribute('href', '/matches/match-1/live');
@@ -31,5 +34,6 @@ it('keeps the start action without a resume card when no match is active', async
   await waitFor(() => expect(close).toHaveBeenCalled());
   expect(screen.queryByRole('link', { name: 'Resume match' })).not.toBeInTheDocument();
   expect(screen.queryByRole('region', { name: 'Active match' })).not.toBeInTheDocument();
+  expect(screen.getByRole('region', { name: 'Statistics' })).toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'Start new match' })).toHaveAttribute('href', '/matches/new');
 });

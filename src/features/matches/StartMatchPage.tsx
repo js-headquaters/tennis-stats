@@ -10,11 +10,13 @@ function localDate(iso: string) {
 }
 export default function StartMatchPage({ deps }: { deps?: MatchServiceDeps }) {
   const navigate = useNavigate();
-  const [services, setServices] = useState<MatchServiceDeps | undefined>(deps);
+  const [services, setServices] = useState<MatchServiceDeps>();
   const [opponents, setOpponents] = useState<Opponent[]>([]);
   const [active, setActive] = useState<MatchBundle>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [name, setName] = useState('');
   const [date, setDate] = useState(() => localDate((deps?.clock ?? dependencies.clock).now()));
   const [format, setFormat] = useState<MatchFormat>('twoSetsSuperTiebreak');
@@ -30,11 +32,11 @@ export default function StartMatchPage({ deps }: { deps?: MatchServiceDeps }) {
         if (cancelled) { owned?.repository.close(); return; }
         const [list, match] = await Promise.all([current.repository.listOpponents(), current.repository.getActiveMatch()]);
         if (!cancelled) { setServices(current); setOpponents(list); setActive(match); setLoading(false); }
-      } catch (e) { if (!cancelled) { setError(e instanceof Error ? e.message : 'Could not load matches'); setLoading(false); } }
+      } catch (e) { if (!cancelled) { setError(e instanceof Error ? e.message : 'Could not load matches'); setLoadFailed(true); setLoading(false); } }
     }
     void load();
     return () => { cancelled = true; owned?.repository.close(); };
-  }, [deps]);
+  }, [deps, attempt]);
   async function submit(event: React.FormEvent) {
     event.preventDefault(); if (!services || busy) return;
     setBusy(true); setError('');
@@ -53,13 +55,13 @@ export default function StartMatchPage({ deps }: { deps?: MatchServiceDeps }) {
     catch (e) { setError(e instanceof Error ? e.message : 'Could not abandon match'); }
     finally { setBusy(false); }
   }
-  return <section><h1>New match</h1>
+  return <section className="match-setup"><h1>New match</h1>
     {error && <p role="alert">{error}</p>}
-    {loading ? <p>Loading matches…</p> : active ? <section aria-label="Active match"><p>An active match exists. Complete or abandon it before starting another.</p><p>Against {active.opponent.name}</p><Link to={`/matches/${active.match.id}/live`}>Resume match to complete it</Link> <button type="button" disabled={busy} onClick={abandon}>Abandon active match</button></section> : <form onSubmit={submit}>
+    {loading ? <p>Loading matches…</p> : loadFailed ? <section aria-label="Loading failed"><p>Could not load match setup. Please try again.</p><button type="button" onClick={() => { setError(''); setLoadFailed(false); setLoading(true); setAttempt(value => value + 1); }}>Retry</button> <Link className="touch-link" to="/settings">Settings</Link></section> : active ? <section aria-label="Active match"><p>An active match exists. Complete or abandon it before starting another.</p><p>Against {active.opponent.name}</p><Link className="touch-link" to={`/matches/${active.match.id}/live`}>Resume match to complete it</Link> <button type="button" disabled={busy} onClick={abandon}>Abandon active match</button></section> : <form onSubmit={submit}>
       <p><label htmlFor="opponent">Opponent</label> <input id="opponent" list="opponent-suggestions" value={name} onChange={e => setName(e.target.value)} required /><datalist id="opponent-suggestions">{opponents.filter(o => o.name.toLowerCase().includes(name.trim().toLowerCase())).map(o => <option key={o.id} value={o.name} />)}</datalist></p>
       <p><label htmlFor="playedAt">Date and time</label> <input id="playedAt" type="datetime-local" value={date} onChange={e => setDate(e.target.value)} required /></p>
       <p><label htmlFor="format">Format</label> <select id="format" value={format} onChange={e => setFormat(e.target.value as MatchFormat)}><option value="twoSetsSuperTiebreak">Two sets plus deciding super tie-break</option><option value="openPractice">Open/practice match with manual completion</option><option value="oneSet">One set</option><option value="bestOfThree">Best of three sets</option></select></p>
-      <fieldset><legend>First server</legend><label><input type="radio" name="server" checked={server === 'player'} onChange={() => setServer('player')} /> Player serves first</label> <label><input type="radio" name="server" checked={server === 'opponent'} onChange={() => setServer('opponent')} /> Opponent serves first</label></fieldset>
+      <fieldset><legend>First server</legend><label className="radio-choice"><input type="radio" name="server" checked={server === 'player'} onChange={() => setServer('player')} /> Player serves first</label> <label className="radio-choice"><input type="radio" name="server" checked={server === 'opponent'} onChange={() => setServer('opponent')} /> Opponent serves first</label></fieldset>
       <button disabled={!services || busy} type="submit">Start match</button>
     </form>}
   </section>;

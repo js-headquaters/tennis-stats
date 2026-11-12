@@ -17,5 +17,5 @@ export default function DashboardPage() {
     })();
     return () => { cancelled = true; };
   }, []);
-  return <section><h1>Home</h1><p>Track your tennis matches.</p>{error && <p role="alert">{error}</p>}{active && <section aria-label="Active match"><h2>Match in progress</h2><p>Against {active.opponent.name}</p><Link className="action-link" to={`/matches/${active.match.id}/live`}>Resume match</Link></section>}<Link className="action-link" to="/matches/new">Start new match</Link></section>;
+  return <section><h1>Home</h1><p>Track your tennis matches.</p><section aria-labelledby="statistics-heading"><h2 id="statistics-heading">Statistics</h2><p>Weekly and monthly statistics will appear here.</p></section>{error && <p role="alert">{error}</p>}{active && <section aria-label="Active match"><h2>Match in progress</h2><p>Against {active.opponent.name}</p><Link className="action-link" to={`/matches/${active.match.id}/live`}>Resume match</Link></section>}<Link className="action-link" to="/matches/new">Start new match</Link></section>;
 }
