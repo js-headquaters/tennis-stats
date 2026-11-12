@@ -29,3 +29,28 @@
 .draft-review { padding-bottom: 6rem; }
 .draft-review button, .draft-review a { min-height: 44px; min-width: 44px; padding: .5rem; font: inherit; }
 .draft-review a { display: inline-flex; align-items: center; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.dashboard { padding-bottom: 10rem; }
+.dashboard button, .dashboard .touch-link { min-height: 44px; min-width: 44px; padding: .5rem .75rem; font: inherit; color: var(--text); background: white; border: 1px solid var(--border); border-radius: .5rem; }
+.dashboard .touch-link { display: inline-flex; align-items: center; }
+.dashboard button[aria-pressed="true"] { background: var(--lime); font-weight: 700; text-decoration: underline; }
+.dashboard button:disabled { opacity: .6; }
+.period-units { display: flex; gap: .5rem; }
+.period-nav { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin: .75rem 0; }
+.period-nav h3 { margin: 0; text-align: center; font-size: 1.1rem; }
+.metric-cards { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); }
+.metric-card { background: white; border: 1px solid var(--border); border-radius: .5rem; padding: 1rem; }
+.metric-card h4 { margin: 0; font-size: 1.1rem; }
+.metric-card-per { margin: .25rem 0 .75rem; }
+.metric-card-stats { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; margin: 0; }
+.metric-card-stats > div { border: 1px solid var(--border); border-radius: .375rem; padding: .5rem .75rem; }
+.metric-card-stats dt { font-size: .875rem; }
+.metric-card-stats dd { margin: 0; font-weight: 600; }
+.metric-card-stats .metric-card-average { font-size: 1.75rem; }
+.metric-card-stats .metric-card-trend { grid-column: 1 / -1; }
+.trend-chart { margin: .75rem 0 0; }
+.trend-chart-visual { height: 120px; }
+.resume-card { border: 2px solid var(--text); border-radius: .5rem; padding: 1rem; margin: 1rem 0; background: white; }
+.recent-matches ul { list-style: none; padding: 0; margin: 0; }
+.recent-matches li { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; padding: .5rem 0; border-bottom: 1px solid var(--border); }
+.floating-action { position: fixed; right: 1rem; bottom: calc(5rem + env(safe-area-inset-bottom)); z-index: 1; font-weight: 700; box-shadow: 0 2px 6px rgb(0 0 0 / .2); }
