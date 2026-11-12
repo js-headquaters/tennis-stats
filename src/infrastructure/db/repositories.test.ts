@@ -28,7 +28,7 @@ function indexedDBDelete(name: string) { return new Promise<void>((resolve, reje
 describe('IndexedDB repository', () => {
   it('round trips rich draft content without changing nulls, zeroes or audio', async () => {
     const repo = await setup(); await repo.saveMatchBundle(bundle('m'));
-    const draft: VoiceDraft = { ...draftFixture('m'), recording: new Blob(['audio'], { type: 'audio/mp4' }), mimeType: 'audio/mp4', transcripts: [{ text: 'first', provider: 'openai', model: 'test', timestamp: 'now' }, { text: 'second', provider: 'openai', model: 'test', timestamp: 'later' }], parsedDraft: { version: 1, warnings: ['warning'], games: [{ server: 'player', result: 'won', netErrors: 0, wideErrors: null, longErrors: null, doubleFaults: 0, failedReturns: null }] }, state: 'waiting-retry', error: { code: 'network', message: 'retry' } };
+    const draft: VoiceDraft = { ...draftFixture('m'), recording: new Blob(['audio'], { type: 'audio/mp4' }), mimeType: 'audio/mp4', transcripts: [{ text: 'first', provider: 'openai', model: 'test', timestamp: 'now' }, { text: 'second', provider: 'openai', model: 'test', timestamp: 'later' }], parsedDraft: { version: 1, warnings: ['warning'], games: [{ server: 'player', result: 'won', netErrors: 0, wideErrors: null, longErrors: null, doubleFaults: 0, failedReturns: null }] }, state: 'waiting-retry', error: { code: 'network', message: 'retry', phase: 'parser' } };
     await repo.saveDraft(draft);
     const saved = await repo.getDraft('d');
     expect(saved).toEqual(draft);

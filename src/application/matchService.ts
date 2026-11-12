@@ -63,6 +63,12 @@ function completeSet(bundle: MatchBundle, set: TennisSet, now: string, ids: IdGe
 export async function addGames(matchId: string, inputs: GameInput[], { repository, clock, ids }: MatchServiceDeps): Promise<MatchBundle> {
   const found = await repository.getMatchBundle(matchId);
   if (!found) throw new Error('Match not found');
+  const bundle = prepareGames(found, inputs, { clock, ids });
+  await repository.saveMatchBundle(bundle);
+  return bundle;
+}
+
+export function prepareGames(found: MatchBundle, inputs: GameInput[], { clock, ids }: Pick<MatchServiceDeps, 'clock' | 'ids'>): MatchBundle {
   const bundle = structuredClone(found);
   if (bundle.match.status !== 'active') throw new Error('Match is not active');
   if (!Array.isArray(inputs) || inputs.length === 0) throw new Error('Add at least one game');
@@ -81,7 +87,6 @@ export async function addGames(matchId: string, inputs: GameInput[], { repositor
     if (setEvaluation(bundle, set).completed) completeSet(bundle, set, now, ids);
   }
   bundle.match.updatedAt = now;
-  await repository.saveMatchBundle(bundle);
   return bundle;
 }
 

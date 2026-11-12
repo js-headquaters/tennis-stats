@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { openDatabase } from '../infrastructure/db/database';
-import { abandonActiveMatch, addGames, completeTieBreak, deleteGame, endSetEarly, finishMatch, startMatch, updateComments, updateGame } from './matchService';
+import { abandonActiveMatch, addGames, completeTieBreak, deleteGame, endSetEarly, finishMatch, prepareGames, startMatch, updateComments, updateGame } from './matchService';
 
 const clock = { now: () => '2026-01-01T12:00:00.000Z' };
 let counter = 0;
@@ -12,6 +12,16 @@ async function setup() { const repository = await openDatabase(`service-${++coun
 const input = { opponentName: ' Alex ', playedAt: clock.now(), firstServer: 'player' as const };
 
 describe('match services', () => {
+  it('prepares games without saving or mutating the original bundle', async () => {
+    const deps = await setup(); const initial = await startMatch(input, deps);
+    const snapshot = structuredClone(initial);
+    const save = vi.spyOn(deps.repository, 'saveMatchBundle');
+    const game = { result: 'won' as const, netErrors: null, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null };
+    const prepared = prepareGames(initial, [game, game], deps);
+    expect(initial).toEqual(snapshot);
+    expect(save).not.toHaveBeenCalled();
+    expect(prepared.games.map(item => [item.ordinal, item.server])).toEqual([[1, 'player'], [2, 'opponent']]);
+  });
   it.each(['bestOfThree', 'openPractice'] as const)('continues %s with a standard set after an early end', async format => {
     const deps = await setup(); const initial = await startMatch({ ...input, format }, deps);
     const result = await endSetEarly(initial.sets[0].id, deps);
