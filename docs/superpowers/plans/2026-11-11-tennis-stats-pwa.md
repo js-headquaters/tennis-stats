@@ -323,27 +323,27 @@ Run targeted tests plus `npm run typecheck && npm run lint`; commit `feat: manag
 **Interfaces:**
 - Produces: `AudioRecorder.start(): Promise<void>`, `stop(): Promise<RecordedAudio>`, `cancel(): Promise<void>`; `createDraftFromAudio`, `retryDraft`, `refineDraftWithAudio`, `updateDraftGame`, and `confirmDraft` application functions.
 
-- [ ] **Step 1: Write failing recording-adapter tests**
+- [x] **Step 1: Write failing recording-adapter tests**
 
 Assert MIME selection tries supported `audio/mp4`/AAC-compatible options before WebM on iOS, handles permission denial, stop/cancel, empty recordings, and preserves a recoverable Blob when upload fails.
 
-- [ ] **Step 2: Write failing draft-service tests**
+- [x] **Step 2: Write failing draft-service tests**
 
 Assert audio is saved before network calls, transcript history is retained, parser receives current match/expected server/existing draft, refinement replaces the draft only after valid output, confirmation writes all games once transactionally, duplicate confirmation is idempotent, and confirmed audio is deleted.
 
-- [ ] **Step 3: Write failing UI tests**
+- [x] **Step 3: Write failing UI tests**
 
 Assert recording states, safe provider errors, offline “waiting to retry,” transcript visibility, editable large-stat draft cards, “Add or correct by voice,” and “Confirm and add.” Assert manual entry remains available after permission/format failure.
 
-- [ ] **Step 4: Run tests and verify failure**
+- [x] **Step 4: Run tests and verify failure**
 
 Run `npm test -- src/infrastructure/audio src/application/draftService.test.ts src/features/voice`; expect failures.
 
-- [ ] **Step 5: Implement the end-to-end draft workflow**
+- [x] **Step 5: Implement the end-to-end draft workflow**
 
 Use repository drafts as the source of truth across reloads. Generate an idempotency marker per confirmation and prevent double submission while provider calls are pending.
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 Run targeted tests, type checking, and linting; commit `feat: add reviewed voice game entry`.
 
