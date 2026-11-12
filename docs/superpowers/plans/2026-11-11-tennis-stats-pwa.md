@@ -539,7 +539,7 @@ Run `npm ci && npm run typecheck && npm run lint && npm test && npm run build &&
 
 Run repository searches for `sk-`, `Authorization: Bearer`, and known test sentinel values; expect no real credentials. Confirm `dist/manifest.webmanifest`, asset URLs, and service-worker scope use `/tennis-stats/`.
 
-- [ ] **Step 6: Commit and push the delivery configuration**
+- [x] **Step 6: Commit and push the delivery configuration**
 
 Commit `ci: deploy verified app to github pages`, push `develop`, verify GitHub Actions succeeds, and verify `https://js-headquaters.github.io/tennis-stats/` loads and can navigate/reload hash routes under the subpath.
 
