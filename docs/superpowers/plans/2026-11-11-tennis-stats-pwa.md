@@ -622,10 +622,10 @@ Before calling the project complete:
 
 **Files:** Modify `docs/ios-smoke-test.md`, `playwright.config.ts`, `tests/e2e/offline-pwa.spec.ts`, `tests/e2e/start-match.spec.ts`, `.gitignore`, `package.json`, `README.md`.
 
-- [ ] **Step 1: Correct the guide against the real UI** — "Record with voice" label and auto-processing; no "Back online" after a cold start; dismissed update prompt stays dismissed; add Private Browsing row; reflect Discard/Cancel controls, Settings Application section, and updates no longer blocked by persisted drafts.
-- [ ] **Step 2: Export the Playwright preview port from `playwright.config.ts` and use it in the specs.**
-- [ ] **Step 3: Hygiene** — `git rm --cached` the tracked `.superpowers/.../task-2-report.md` (keep file on disk); add `coverage/` to `.gitignore`; remove meaningless `package.json` scaffold leftovers; README "structured points" → "games".
-- [ ] **Step 4: Full release gate** — `npm run typecheck && npm run lint && npm test && npm run build && npm run verify:pwa`, then full Playwright on chromium and webkit; commit `docs: correct ios smoke guide and repo hygiene`.
+- [x] **Step 1: Correct the guide against the real UI** — "Record with voice" label and auto-processing; no "Back online" after a cold start; dismissed update prompt stays dismissed; add Private Browsing row; reflect Discard/Cancel controls, Settings Application section, and updates no longer blocked by persisted drafts.
+- [x] **Step 2: Export the Playwright preview port from `playwright.config.ts` and use it in the specs.**
+- [x] **Step 3: Hygiene** — `git rm --cached` the tracked `.superpowers/.../task-2-report.md` (keep file on disk); add `coverage/` to `.gitignore`; remove meaningless `package.json` scaffold leftovers; README "structured points" → "games".
+- [x] **Step 4: Full release gate** — `npm run typecheck && npm run lint && npm test && npm run build && npm run verify:pwa`, then full Playwright on chromium and webkit; commit `docs: correct ios smoke guide and repo hygiene`.
 
 ### Deferred (not scheduled)
 
