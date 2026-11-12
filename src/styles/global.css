@@ -23,3 +23,6 @@
 .draft-game-card > label { display: block; margin: .75rem 0; }
 .draft-game-card label input, .draft-game-card label select { display: block; width: 100%; }
 .draft-game-card .metric { min-width: 0; }
+.record-page { padding-bottom: 6rem; }
+.record-page button, .record-page a { min-height: 44px; min-width: 44px; padding: .5rem; font: inherit; }
+.record-page a { display: inline-flex; align-items: center; }

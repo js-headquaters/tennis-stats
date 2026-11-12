@@ -22,7 +22,7 @@ it('shows context and adds a manual game with zero and unknown metrics', async (
   const { save, data } = setup();
   expect(await screen.findByText(/Alex/)).toBeInTheDocument();
   expect(screen.getByText(/next server: player/i)).toBeInTheDocument();
-  expect(screen.getByRole('link', { name:/voice/i })).toBeInTheDocument();
+  expect(screen.getByRole('link', { name:/voice/i })).toHaveAttribute('href', '/matches/m/record');
   fireEvent.click(screen.getByRole('button', { name:/manual/i }));
   fireEvent.change(screen.getByLabelText('Net errors'), { target:{ value:'0' } });
   fireEvent.click(screen.getByRole('button', { name:'Add game' }));

@@ -1,0 +1,94 @@
+import { useEffect, useRef, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { dependencies } from '../../app/dependencies';
+import type { TennisRepository } from '../../application/ports';
+import type { VoiceDraft } from '../../domain/model';
+import { evaluateSet } from '../../domain/scoring';
+import type { AudioRecorder } from '../../infrastructure/audio/mediaRecorder';
+
+type Service = { createDraftFromAudio(input: { matchId: string; setId: string; audio: Blob; mimeType: string }, signal: AbortSignal): Promise<Pick<VoiceDraft, 'id' | 'state'>> };
+type Scheduler = { schedule(action: () => void, delay: number): () => void };
+const defaultScheduler: Scheduler = { schedule(action, delay) { const id = setTimeout(action, delay); return () => clearTimeout(id); } };
+type Props = { repository?: TennisRepository; createRecorder?: () => AudioRecorder; createService?: (repository: TennisRepository) => Service; scheduler?: Scheduler };
+type State = 'idle' | 'requesting-permission' | 'recording' | 'stopping' | 'processing' | 'waiting-retry' | 'error';
+const messages: Record<string, string> = { permission:'Microphone permission was denied or unavailable.', unsupported:'Audio recording or its format is not supported on this device.', empty:'The recording was empty. Please try again.', failed:'Recording failed. Please try again.', start:'Recording could not start. Please try again.' };
+
+export default function RecordPage(props: Props) {
+  const { matchId = '' } = useParams();
+  return <RecordContent key={matchId} {...props} matchId={matchId} />;
+}
+function RecordContent({ matchId, repository, createRecorder = dependencies.createRecorder, createService = dependencies.createDraftService, scheduler = defaultScheduler }: Props & { matchId: string }) {
+  const navigate = useNavigate();
+  const [loaded, setLoaded] = useState<{ repo: TennisRepository; setId: string }>();
+  const [loading, setLoading] = useState(true); const [loadError, setLoadError] = useState(''); const [attempt, setAttempt] = useState(0);
+  const [state, setState] = useState<State>('idle'); const [error, setError] = useState('');
+  const recorder = useRef<AudioRecorder | null>(null); const lock = useRef(false); const alive = useRef(true); const timer = useRef<(() => void) | undefined>(undefined); const abort = useRef<AbortController | null>(null); const generation = useRef(0);
+  useEffect(() => {
+    alive.current = true; let cancelled = false; let owned: TennisRepository | undefined;
+    const close = () => { const current = owned; owned = undefined; current?.close(); };
+    async function load() {
+      try {
+        const repo = repository ?? await dependencies.openDatabase(); if (!repository) owned = repo;
+        if (cancelled) { close(); return; }
+        const bundle = await repo.getMatchBundle(matchId);
+        if (cancelled) return;
+        const set = bundle?.sets.find(item => item.status === 'active');
+        if (!bundle || bundle.match.id !== matchId) { close(); setLoadError('Match not found.'); }
+        else if (bundle.match.status !== 'active' || !set || set.matchId !== matchId || set.kind !== 'standard') { close(); setLoadError('No active standard set is available for recording.'); }
+        else {
+          const score = evaluateSet(bundle.games.filter(game => game.setId === set.id), bundle.tieBreaks.find(tie => tie.id === set.tieBreakId) ?? null);
+          if (score.completed || (score.playerGames === 6 && score.opponentGames === 6)) { close(); setLoadError('No active standard set is available for recording.'); }
+          else setLoaded({ repo, setId:set.id });
+        }
+        setLoading(false);
+      } catch { close(); if (!cancelled) { setLoadError('Could not load match. Please try again.'); setLoading(false); } }
+    }
+    void load();
+    return () => { cancelled = true; alive.current = false; generation.current++; timer.current?.(); abort.current?.abort(); void recorder.current?.cancel().catch(() => {}); recorder.current = null; close(); };
+  }, [repository, matchId, attempt]);
+  function showError(reason: unknown) {
+    let code = ''; try { code = (reason as { code?: string })?.code ?? ''; } catch { /* Untrusted error. */ }
+    setError(messages[code] ?? 'Recording or processing failed. Please try again. Previously saved recordings may still be available.'); setState('error');
+  }
+  async function start() {
+    if (lock.current || !loaded) return; lock.current = true; const token = ++generation.current; setError(''); setState('requesting-permission');
+    try {
+      const current = createRecorder(); recorder.current = current; await current.start();
+      if (!alive.current || token !== generation.current) return;
+      setState('recording'); timer.current = scheduler.schedule(() => { void stop(); }, 120000);
+    } catch (e) { if (alive.current && token === generation.current) showError(e); }
+    finally { if (token === generation.current) lock.current = false; }
+  }
+  async function stop() {
+    if (lock.current || !recorder.current || !loaded) return; lock.current = true; const token = generation.current; timer.current?.(); timer.current = undefined; setState('stopping');
+    try {
+      const audio = await recorder.current.stop();
+      if (!alive.current || token !== generation.current) return;
+      recorder.current = null;
+      if (!audio.blob.size) { showError({ code:'empty' }); return; }
+      setState('processing'); const controller = new AbortController(); abort.current = controller;
+      const draft = await createService(loaded.repo).createDraftFromAudio({ matchId, setId:loaded.setId, audio:audio.blob, mimeType:audio.mimeType }, controller.signal);
+      if (!alive.current || token !== generation.current) return;
+      if (draft.state === 'waiting-retry') setState('waiting-retry');
+      navigate(`/voice/${encodeURIComponent(draft.id)}`);
+    } catch (e) { if (alive.current && token === generation.current) showError(e); }
+    finally { if (token === generation.current) lock.current = false; }
+  }
+  async function cancel() {
+    const token = ++generation.current; timer.current?.(); timer.current = undefined; abort.current?.abort(); const current = recorder.current; recorder.current = null; lock.current = false;
+    try { await current?.cancel(); } catch { /* Cancellation remains safe. */ }
+    if (alive.current && token === generation.current) { setError(''); setState('idle'); }
+  }
+  if (loading) return <section><h1>Record voice entry</h1><p role="status">Loading match…</p></section>;
+  return <section className="record-page"><h1>Record voice entry</h1>
+    {loadError ? <><p role="alert">{loadError}</p><button onClick={() => { setLoading(true); setLoadError(''); setLoaded(undefined); setAttempt(n => n + 1); }}>Retry</button></> : <>
+      <p>Record up to two minutes. Recording stops automatically at the limit.</p>
+      <p role="status" aria-live="polite">{({ idle:'Ready to record.', 'requesting-permission':'Requesting microphone permission…', recording:'Recording…', stopping:'Stopping recording…', processing:'Processing recording…', 'waiting-retry':'Waiting to retry.', error:'Recording unavailable.' } as const)[state]}</p>
+      {error && <p role="alert">{error}</p>}
+      {(state === 'idle' || state === 'error') && <button onClick={() => void start()}>Start recording</button>}
+      {state === 'recording' && <button onClick={() => void stop()}>Stop recording</button>}
+      {(state === 'requesting-permission' || state === 'recording' || state === 'stopping') && <button onClick={() => void cancel()}>Cancel recording</button>}
+    </>}
+    <p><Link to={`/matches/${encodeURIComponent(matchId)}/live`}>Manual entry</Link> <Link to="/settings">Settings</Link></p>
+  </section>;
+}
