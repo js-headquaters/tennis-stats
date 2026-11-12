@@ -221,23 +221,23 @@ Run `npm test -- src/infrastructure/db && npm run typecheck`, then `git add src/
 - Consumes: `TennisRepository`, domain validators, `inferServer`.
 - Produces: `startMatch(input: StartMatchInput, deps: MatchServiceDeps): Promise<MatchBundle>` and `abandonActiveMatch(id, deps): Promise<void>`; `StartMatchInput` contains opponent name/ID, ISO `playedAt`, format, and first server.
 
-- [ ] **Step 1: Write failing service tests**
+- [x] **Step 1: Write failing service tests**
 
 Assert existing opponents are reused case-insensitively, a new opponent is created inline, the default format is `twoSetsSuperTiebreak`, and starting while a match is active returns an actionable conflict rather than creating a second active match.
 
-- [ ] **Step 2: Write failing component tests**
+- [x] **Step 2: Write failing component tests**
 
 Assert the format order from the spec, editable date/time, searchable opponent suggestions, new-opponent creation, first-server choice, and explicit complete/abandon prompt when an active match exists.
 
-- [ ] **Step 3: Run tests and verify failure**
+- [x] **Step 3: Run tests and verify failure**
 
 Run `npm test -- src/application/matchService.test.ts src/features/matches/StartMatchPage.test.tsx`; expect failures.
 
-- [ ] **Step 4: Implement the vertical slice**
+- [x] **Step 4: Implement the vertical slice**
 
 Create a match with standard set ordinal 1, navigate to `/matches/:id/live`, and show an active-match resume card on the dashboard.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run `npm test -- src/application/matchService.test.ts src/features/matches/StartMatchPage.test.tsx && npm run typecheck`, then run `git add src && git commit -m "feat: start matches with reusable opponents"`.
 
