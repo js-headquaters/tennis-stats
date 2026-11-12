@@ -89,27 +89,27 @@
 **Interfaces:**
 - Produces: hash routes `/`, `/matches`, `/matches/new`, `/matches/:matchId`, `/matches/:matchId/live`, `/voice/:draftId`, `/settings`; scripts `dev`, `build`, `typecheck`, `lint`, `test`, `test:e2e`.
 
-- [ ] **Step 1: Initialize the empty remote locally without losing planning files**
+- [x] **Step 1: Initialize the empty remote locally without losing planning files**
 
 Run `git init -b develop`, add remote `git@github.com:js-headquaters/tennis-stats.git`, confirm `git ls-remote origin` is empty, and add `.superpowers/`, `node_modules/`, `dist/`, `playwright-report/`, `test-results/`, and `.env*` to `.gitignore`.
 
-- [ ] **Step 2: Write failing shell tests**
+- [x] **Step 2: Write failing shell tests**
 
 In `src/app/App.test.tsx`, assert the mobile nav exposes Home, Matches, and Settings and the dashboard has an accessible “Start new match” link. In `tests/e2e/shell.spec.ts`, open `/tennis-stats/#/settings` and assert the Settings hash route survives reload.
 
-- [ ] **Step 3: Run tests and verify the missing scaffold fails**
+- [x] **Step 3: Run tests and verify the missing scaffold fails**
 
 Run `npm test -- src/app/App.test.tsx` and `npm run test:e2e -- tests/e2e/shell.spec.ts`; expect missing scripts/modules or assertions to fail.
 
-- [ ] **Step 4: Create the React/Vite scaffold and shared visual shell**
+- [x] **Step 4: Create the React/Vite scaffold and shared visual shell**
 
 Set Vite `base: "/tennis-stats/"`, use `HashRouter` so GitHub Pages reloads do not require a server fallback, configure jsdom/Testing Library, install the Chromium Playwright browser, and implement softened lime headers, dark-gray text, muted borders, safe-area padding, visible focus, and 44px minimum controls. Use placeholder route pages only where later tasks replace them.
 
-- [ ] **Step 5: Run baseline quality checks**
+- [x] **Step 5: Run baseline quality checks**
 
 Run `npm run typecheck && npm run lint && npm test && npm run build && npm run test:e2e -- tests/e2e/shell.spec.ts`; expect every command to exit 0 and the production asset URLs to begin with `/tennis-stats/`.
 
-- [ ] **Step 6: Commit the foundation and approved documents**
+- [x] **Step 6: Commit the foundation and approved documents**
 
 Run `git add . && git commit -m "chore: bootstrap tennis stats pwa"`.
 
