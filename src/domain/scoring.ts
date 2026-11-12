@@ -28,7 +28,11 @@ export function inferServer(first: Server, zeroBasedGameIndex: number): Server {
 function tieBreakWinner(tieBreak: TieBreak | null, kind: TieBreak['kind']): 'player' | 'opponent' | null {
   if (!tieBreak || tieBreak.kind !== kind) return null;
   const target = kind === 'super' ? 10 : 7;
-  if (Math.max(tieBreak.playerPoints, tieBreak.opponentPoints) < target || Math.abs(tieBreak.playerPoints - tieBreak.opponentPoints) < 2) return null;
+  const { playerPoints, opponentPoints } = tieBreak;
+  if (![playerPoints, opponentPoints].every((points) => Number.isInteger(points) && points >= 0)) return null;
+  const high = Math.max(playerPoints, opponentPoints);
+  const margin = Math.abs(playerPoints - opponentPoints);
+  if (high < target || margin < 2 || (high > target && margin !== 2)) return null;
   return tieBreak.playerPoints > tieBreak.opponentPoints ? 'player' : 'opponent';
 }
 
@@ -52,9 +56,9 @@ export function evaluateSet(games: Game[], tieBreak: TieBreak | null): SetEvalua
 
 export function evaluateMatch(format: MatchFormat, sets: SetEvaluation[]): MatchEvaluation {
   if (format === 'twoSetsSuperTiebreak') {
-    const standard = sets.filter((set) => set.kind === 'standard' && set.completed && set.winner !== null).slice(0, 2);
-    let playerSets = standard.filter((set) => set.winner === 'player').length;
-    let opponentSets = standard.filter((set) => set.winner === 'opponent').length;
+    const standard = sets.filter((set) => set.kind === 'standard').slice(0, 2);
+    let playerSets = standard.filter((set) => set.completed && set.winner === 'player').length;
+    let opponentSets = standard.filter((set) => set.completed && set.winner === 'opponent').length;
     let winner: SetEvaluation['winner'] = playerSets === 2 ? 'player' : opponentSets === 2 ? 'opponent' : null;
     if (playerSets === 1 && opponentSets === 1) {
       const secondIndex = sets.indexOf(standard[1]);
@@ -65,8 +69,8 @@ export function evaluateMatch(format: MatchFormat, sets: SetEvaluation[]): Match
     }
     return { complete: winner !== null, winner, playerSets, opponentSets, requiresManualCompletion: false };
   }
-  const playerSets = sets.filter((set) => set.completed && set.winner === 'player').length;
-  const opponentSets = sets.filter((set) => set.completed && set.winner === 'opponent').length;
+  const playerSets = sets.filter((set) => set.kind === 'standard' && set.completed && set.winner === 'player').length;
+  const opponentSets = sets.filter((set) => set.kind === 'standard' && set.completed && set.winner === 'opponent').length;
   const required = format === 'oneSet' ? 1 : format === 'bestOfThree' ? 2 : Infinity;
   if (format === 'openPractice') return { complete: false, winner: null, playerSets, opponentSets, requiresManualCompletion: true };
   const winner = playerSets >= required ? 'player' : opponentSets >= required ? 'opponent' : null;

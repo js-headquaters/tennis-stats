@@ -30,6 +30,21 @@ describe('tennis scoring', () => {
     expect(evaluateSet(games(6, 6), tieBreak('super', 10, 8)).completed).toBe(false);
   });
 
+  it.each([
+    ['standard', 7, 0, 'player'], ['standard', 6, 8, 'opponent'],
+    ['super', 10, 8, 'player'], ['super', 9, 11, 'opponent'],
+  ] as const)('accepts terminal %s tie-break %i-%i', (kind, player, opponent, winner) => {
+    expect(evaluateSet(kind === 'standard' ? games(6, 6) : [], tieBreak(kind, player, opponent))).toMatchObject({ completed: true, winner });
+  });
+
+  it.each([
+    ['standard', 8, 4], ['super', 11, 8], ['standard', 7, -1],
+    ['super', -1, 10], ['standard', 7.5, 4], ['super', 3, 10.5],
+    ['standard', Infinity, 4], ['super', 10, NaN], ['standard', 7, 6], ['super', 9, 8],
+  ] as const)('rejects non-terminal or invalid %s tie-break %s-%s', (kind, player, opponent) => {
+    expect(evaluateSet(kind === 'standard' ? games(6, 6) : [], tieBreak(kind, player, opponent))).toMatchObject({ completed: false, winner: null });
+  });
+
   it.each([[6, 5], [6, 6]] as const)('does not auto-complete at %i-%i', (won, lost) => {
     expect(evaluateSet(games(won, lost), null).completed).toBe(false);
   });
@@ -41,6 +56,14 @@ describe('tennis scoring', () => {
     expect(evaluateMatch('bestOfThree', [set(6, 4), set(2, 3), set(6, 4)])).toMatchObject({ complete: true, winner: 'player' });
   });
 
+  it('does not count deciding super tie-breaks in other match formats', () => {
+    const standard = evaluateSet(games(6, 2), null);
+    const deciding = evaluateSet([], tieBreak('super', 10, 8));
+    expect(evaluateMatch('oneSet', [deciding])).toMatchObject({ complete: false, winner: null, playerSets: 0 });
+    expect(evaluateMatch('bestOfThree', [standard, deciding])).toMatchObject({ complete: false, winner: null, playerSets: 1 });
+    expect(evaluateMatch('openPractice', [deciding])).toMatchObject({ complete: false, playerSets: 0 });
+  });
+
   it('requires a deciding super tie-break after split completed sets', () => {
     const first = evaluateSet(games(6, 2), null);
     const second = evaluateSet(games(2, 6), null);
@@ -49,6 +72,15 @@ describe('tennis scoring', () => {
     expect(deciding).toMatchObject({ kind: 'decidingSuperTiebreak', completed: true, winner: 'player' });
     expect(evaluateMatch('twoSetsSuperTiebreak', [first, second, deciding])).toMatchObject({ complete: true, winner: 'player' });
     expect(evaluateMatch('twoSetsSuperTiebreak', [first, first])).toMatchObject({ complete: true, winner: 'player' });
+  });
+
+  it('does not bypass an unfinished earlier standard set in the super tie-break format', () => {
+    const unfinished = evaluateSet(games(3, 2), null);
+    const player = evaluateSet(games(6, 2), null);
+    const opponent = evaluateSet(games(2, 6), null);
+    const deciding = evaluateSet([], tieBreak('super', 10, 8));
+    expect(evaluateMatch('twoSetsSuperTiebreak', [unfinished, player, opponent, deciding])).toMatchObject({ complete: false, winner: null, playerSets: 1, opponentSets: 0 });
+    expect(evaluateMatch('twoSetsSuperTiebreak', [unfinished, player, player])).toMatchObject({ complete: false, winner: null, playerSets: 1 });
   });
 
   it('keeps open practice matches manually completed', () => {
