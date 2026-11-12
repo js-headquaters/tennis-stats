@@ -11,7 +11,7 @@ export interface StatisticsParser { parse(request: { transcript: string; matchCo
 
 export interface Clock { now(): string }
 export interface IdGenerator { next(): string }
-export interface MatchFilter { status?: MatchStatus; opponentId?: string }
+export interface MatchFilter { status?: MatchStatus; opponentId?: string; /** Inclusive ISO instant lower bound on playedAt. */ from?: string; /** Inclusive ISO instant upper bound on playedAt. */ to?: string }
 export interface TennisRepository {
   readonly recoveryError: unknown | null;
   getActiveMatch(): Promise<MatchBundle | undefined>;

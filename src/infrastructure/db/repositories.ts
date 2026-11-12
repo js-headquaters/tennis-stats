@@ -26,7 +26,18 @@ export class IndexedDbTennisRepository implements TennisRepository {
   private writable() { if (this.recoveryError !== null) throw new Error('Database is in read-only recovery mode'); }
   close() { this.db.close(); }
   async listOpponents() { return this.db.opponents.toArray(); }
-  async listMatches(filter: MatchFilter = {}) { return (await this.db.matches.toArray()).filter(m => (!filter.status || m.status === filter.status) && (!filter.opponentId || m.opponentId === filter.opponentId)); }
+  /** Newest first by `playedAt`; `from`/`to` are inclusive ISO instants. Matches with an unreadable date sort last and never satisfy a date bound. */
+  async listMatches(filter: MatchFilter = {}) {
+    const from = filter.from === undefined ? undefined : new Date(filter.from).getTime();
+    const to = filter.to === undefined ? undefined : new Date(filter.to).getTime();
+    const timed = (await this.db.matches.toArray())
+      .filter(m => (!filter.status || m.status === filter.status) && (!filter.opponentId || m.opponentId === filter.opponentId))
+      .map(match => ({ match, time: new Date(match.playedAt).getTime() }));
+    return timed
+      .filter(({ time }) => (from === undefined || time >= from) && (to === undefined || time <= to))
+      .sort((a, b) => { const x = Number.isNaN(a.time) ? -Infinity : a.time; const y = Number.isNaN(b.time) ? -Infinity : b.time; return x === y ? 0 : y > x ? 1 : -1; })
+      .map(({ match }) => match);
+  }
   async getActiveMatch() {
     return this.db.transaction('r', this.db.matches, this.db.opponents, this.db.sets, this.db.games, this.db.tieBreaks, async () => {
       const match = await this.db.matches.where('status').equals('active').first();

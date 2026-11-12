@@ -199,6 +199,19 @@ describe('IndexedDB repository', () => {
     expect(await repo.listMatches()).toHaveLength(1);
     expect(await repo.listOpponents()).toHaveLength(1);
   });
+  it('lists matches newest first and filters by opponent and inclusive instant range', async () => {
+    const repo = await setup();
+    const at = (id: string, playedAt: string, opponentId = 'o') => { const b = bundle(id, 'completed'); return { ...b, opponent: { ...b.opponent, id: opponentId, name: opponentId, normalizedName: opponentId }, match: { ...b.match, opponentId, playedAt } }; };
+    await repo.saveMatchBundle(at('old', '2026-01-01T10:00:00.000Z'));
+    await repo.saveMatchBundle(at('new', '2026-03-01T10:00:00.000Z', 'p'));
+    await repo.saveMatchBundle(at('mid', '2026-02-01T10:00:00.000Z'));
+    const ids = async (filter?: Parameters<typeof repo.listMatches>[0]) => (await repo.listMatches(filter)).map(m => m.id);
+    expect(await ids()).toEqual(['new', 'mid', 'old']);
+    expect(await ids({ opponentId: 'o' })).toEqual(['mid', 'old']);
+    expect(await ids({ from: '2026-02-01T10:00:00.000Z' })).toEqual(['new', 'mid']);
+    expect(await ids({ to: '2026-02-01T10:00:00.000Z' })).toEqual(['mid', 'old']);
+    expect(await ids({ opponentId: 'o', from: '2026-01-15T00:00:00.000Z', to: '2026-02-28T00:00:00.000Z' })).toEqual(['mid']);
+  });
   it('abandons only an active match without replacing its children', async () => {
     const repo = await setup(); const original = bundle('m');
     await repo.saveMatchBundle(original);

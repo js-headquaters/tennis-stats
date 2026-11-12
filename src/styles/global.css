@@ -54,3 +54,10 @@
 .recent-matches ul { list-style: none; padding: 0; margin: 0; }
 .recent-matches li { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; padding: .5rem 0; border-bottom: 1px solid var(--border); }
 .floating-action { position: fixed; right: 1rem; bottom: calc(5rem + env(safe-area-inset-bottom)); z-index: 1; font-weight: 700; box-shadow: 0 2px 6px rgb(0 0 0 / .2); }
+.match-history button, .match-history .touch-link, .match-history input, .match-history select { min-height: 44px; min-width: 44px; padding: .5rem; font: inherit; }
+.match-history button, .match-history .touch-link { color: var(--text); background: white; border: 1px solid var(--border); border-radius: .5rem; }
+.match-history .touch-link { display: inline-flex; align-items: center; font-weight: 700; }
+.match-filters label { display: block; }
+.match-filters input, .match-filters select { display: block; width: 100%; max-width: 30rem; }
+.match-history ul { list-style: none; padding: 0; margin: 0; }
+.match-history li { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .75rem; padding: .5rem 0; border-bottom: 1px solid var(--border); }
