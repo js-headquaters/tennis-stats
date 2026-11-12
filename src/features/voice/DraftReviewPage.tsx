@@ -5,6 +5,7 @@ import type { TennisRepository } from '../../application/ports';
 import type { DraftGame, VoiceDraft } from '../../domain/model';
 import type { AudioRecorder } from '../../infrastructure/audio/mediaRecorder';
 import DraftGameCard from './DraftGameCard';
+import { useWorkHold } from '../../app/workGuard';
 
 type Service = ReturnType<typeof dependencies.createDraftService>;
 type Scheduler = { schedule(action: () => void, delay: number): () => void };
@@ -26,6 +27,8 @@ function ReviewContent({ draftId, repository, createService = dependencies.creat
   const [operation, setOperation] = useState(''); const [error, setError] = useState('');
   const [dirty, setDirty] = useState<Set<number>>(() => new Set()); const dirtyRef = useRef(new Set<number>());
   function dirtyChanged(index: number, value: boolean) { const next = new Set(dirtyRef.current); if (value) next.add(index); else next.delete(index); dirtyRef.current = next; setDirty(next); }
+  // In-flight recording/processing/confirmation and unsaved game edits would be lost by a reload, so they block app updates.
+  useWorkHold(!!operation || dirty.size > 0);
   const alive = useRef(true); const lock = useRef(false); const generation = useRef(0); const recorder = useRef<AudioRecorder | null>(null); const timer = useRef<(() => void) | undefined>(undefined); const abort = useRef<AbortController | null>(null);
   useEffect(() => {
     alive.current = true; let cancelled = false; let owned: TennisRepository | undefined;

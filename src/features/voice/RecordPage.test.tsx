@@ -6,6 +6,7 @@ import type { MatchBundle, VoiceDraft } from '../../domain/model';
 import { createDraftService } from '../../application/draftService';
 import RecordPage from './RecordPage';
 import { dependencies } from '../../app/dependencies';
+import { workRegistry } from '../../app/workGuard';
 
 const now = '2026-01-01T00:00:00Z';
 const bundle: MatchBundle = { opponent:{ id:'o', name:'Alex', normalizedName:'alex', createdAt:now, updatedAt:now }, match:{ id:'m', opponentId:'o', playedAt:now, format:'oneSet', firstServer:'player', status:'active', comments:null, createdAt:now, updatedAt:now }, sets:[{ id:'s', matchId:'m', ordinal:1, kind:'standard', status:'active', tieBreakId:null, createdAt:now, updatedAt:now }], games:[], tieBreaks:[] };
@@ -138,4 +139,23 @@ it('automatically stops at the stated limit with an injected scheduler', async (
   fireEvent.click(await screen.findByRole('button', { name:'Start recording' })); await screen.findByRole('button', { name:'Stop recording' });
   expect(scheduler.schedule).toHaveBeenCalledWith(expect.any(Function), 120000); await act(async () => deadline());
   await screen.findByText('Draft review'); expect(recorder.stop).toHaveBeenCalledTimes(1); expect(clear).toHaveBeenCalled();
+});
+it('holds the update work guard while recording and while audio is unsaved, releasing once persisted', async () => {
+  const { service } = setup(); service.persistDraftFromAudio.mockRejectedValueOnce({ code:'storage' });
+  await screen.findByRole('button', { name:'Start recording' }); expect(workRegistry.isBusy()).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name:'Start recording' }));
+  await screen.findByRole('button', { name:'Stop recording' }); expect(workRegistry.isBusy()).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name:'Stop recording' }));
+  await screen.findByRole('button', { name:'Retry saving recording' }); expect(workRegistry.isBusy()).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name:'Retry saving recording' }));
+  expect(await screen.findByText('Draft review')).toBeInTheDocument(); expect(workRegistry.isBusy()).toBe(false);
+});
+it('releases the update work guard when a recording is cancelled or the page unmounts', async () => {
+  const { view } = setup();
+  fireEvent.click(await screen.findByRole('button', { name:'Start recording' }));
+  fireEvent.click(await screen.findByRole('button', { name:'Cancel recording' }));
+  await screen.findByRole('button', { name:'Start recording' }); expect(workRegistry.isBusy()).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name:'Start recording' }));
+  await screen.findByRole('button', { name:'Stop recording' }); expect(workRegistry.isBusy()).toBe(true);
+  view.unmount(); expect(workRegistry.isBusy()).toBe(false);
 });

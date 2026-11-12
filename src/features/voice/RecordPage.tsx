@@ -5,6 +5,7 @@ import type { TennisRepository } from '../../application/ports';
 import type { VoiceDraft } from '../../domain/model';
 import { evaluateSet } from '../../domain/scoring';
 import type { AudioRecorder } from '../../infrastructure/audio/mediaRecorder';
+import { useWorkHold } from '../../app/workGuard';
 
 type Service = { persistDraftFromAudio(input: { matchId: string; setId: string; audio: Blob; mimeType: string }): Promise<Pick<VoiceDraft, 'id' | 'state'>> };
 type Scheduler = { schedule(action: () => void, delay: number): () => void };
@@ -25,6 +26,8 @@ function RecordContent({ matchId, repository, createRecorder = dependencies.crea
   const [drafts, setDrafts] = useState<VoiceDraft[]>([]); const [listError, setListError] = useState(false);
   const [state, setState] = useState<State>('idle'); const [error, setError] = useState('');
   const [unsaved, setUnsaved] = useState<{ blob: Blob; mimeType: string } | null>(null);
+  // Unpersisted audio or an in-progress recording would be lost by a reload, so it blocks app updates.
+  useWorkHold(state === 'requesting-permission' || state === 'recording' || state === 'stopping' || state === 'saving' || !!unsaved);
   const recorder = useRef<AudioRecorder | null>(null); const lock = useRef(false); const alive = useRef(true); const timer = useRef<(() => void) | undefined>(undefined); const generation = useRef(0);
   useEffect(() => {
     alive.current = true; let cancelled = false; let owned: TennisRepository | undefined;

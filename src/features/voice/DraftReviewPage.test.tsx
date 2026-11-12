@@ -5,6 +5,7 @@ import type { TennisRepository } from '../../application/ports';
 import type { VoiceDraft } from '../../domain/model';
 import DraftReviewPage from './DraftReviewPage';
 import { dependencies } from '../../app/dependencies';
+import { workRegistry } from '../../app/workGuard';
 
 const draft: VoiceDraft = { id:'d', matchId:'m', setId:'s', confirmationId:'c', dataVersion:1, recording:null, mimeType:null, transcripts:[{ text:'Original transcript', provider:'provider', model:'model', timestamp:'now' }], parsedDraft:{ version:1, games:[{ server:'player', result:'won', netErrors:null, wideErrors:0, longErrors:null, doubleFaults:null, failedReturns:null }], warnings:['Check score'] }, state:'ready', error:null, createdAt:'now', updatedAt:'now' };
 it('shows the saved draft without invoking providers or recording and confirms only on click', async () => {
@@ -129,4 +130,18 @@ it('discarding unsaved edits restores the saved values and re-enables confirmati
   expect(within(card).getByLabelText('Wide errors')).toHaveValue('0');
   expect(screen.getByRole('button', { name:'Confirm and add' })).toBeEnabled(); expect(screen.queryByText(/save or discard/i)).not.toBeInTheDocument();
   expect(service.updateDraftGame).not.toHaveBeenCalled();
+});
+it('holds the update work guard while recording, processing, or with unsaved game edits', async () => {
+  const { service } = setup(); let resolve!: (value: VoiceDraft) => void; service.refineDraftWithAudio.mockReturnValue(new Promise(r => { resolve = r; }));
+  const card = await screen.findByRole('form', { name:'Draft game 1' }); expect(workRegistry.isBusy()).toBe(false);
+  fireEvent.change(within(card).getByLabelText('Net errors'), { target:{ value:'2' } });
+  await waitFor(() => expect(workRegistry.isBusy()).toBe(true));
+  fireEvent.click(within(card).getByRole('button', { name:'Save game 1' }));
+  await waitFor(() => expect(workRegistry.isBusy()).toBe(false));
+  fireEvent.click(await screen.findByRole('button', { name:'Start recording' }));
+  await screen.findByRole('button', { name:'Stop recording' }); expect(workRegistry.isBusy()).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name:'Stop recording' }));
+  await waitFor(() => expect(service.refineDraftWithAudio).toHaveBeenCalledTimes(1)); expect(workRegistry.isBusy()).toBe(true);
+  resolve(draft);
+  await waitFor(() => expect(workRegistry.isBusy()).toBe(false));
 });
