@@ -391,19 +391,19 @@ Run targeted tests plus type checking/linting; commit `feat: show calendar tenni
 - Consumes: repository filters `{ opponentId?: string; from?: string; to?: string }` and correction functions from Task 7.
 - Produces: newest-first history, reusable opponent/date filters, completed/unfinished/abandoned labels, editable comments and match records without reactivation.
 
-- [ ] **Step 1: Write failing page tests**
+- [x] **Step 1: Write failing page tests**
 
 Assert newest-first ordering, opponent/date filtering, set/game/tie-break detail, per-match averages/sample sizes, comments, completed-record editing, and that editing never changes status back to active.
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run `npm test -- src/features/matches/MatchHistoryPage.test.tsx src/features/matches/MatchDetailsPage.test.tsx`; expect failures.
 
-- [ ] **Step 3: Implement history and details**
+- [x] **Step 3: Implement history and details**
 
 Reuse Task 7 forms/cards instead of introducing separate edit semantics. Show incomplete and unknown states in text, not color alone.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run targeted tests, type checking, and linting; commit `feat: browse and edit match history`.
 
