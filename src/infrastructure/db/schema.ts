@@ -8,7 +8,7 @@ export class TennisDatabase extends Dexie {
   games!: Table<Game, string>;
   tieBreaks!: Table<TieBreak, string>;
   drafts!: Table<VoiceDraft, string>;
-  metadata!: Table<{ key: string; value: number }, string>;
+  metadata!: Table<{ key: string; value: number | { draftId: string; matchId: string; confirmedAt: string } }, string>;
   constructor(name = 'tennis-stats') {
     super(name);
     this.version(1).stores({ opponents: 'id, normalizedName', matches: 'id, status, opponentId, playedAt', sets: 'id, matchId, ordinal', games: 'id, setId, ordinal', tieBreaks: 'id, setId', drafts: 'id, matchId', metadata: 'key' });

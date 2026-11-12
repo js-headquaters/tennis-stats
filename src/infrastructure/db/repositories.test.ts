@@ -1,8 +1,10 @@
 // @vitest-environment node
 import 'fake-indexeddb/auto';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { MatchBundle, DatabaseSnapshot } from '../../domain/model';
+import type { MatchBundle, DatabaseSnapshot, VoiceDraft } from '../../domain/model';
 import { openDatabase } from './database';
+import { TennisDatabase } from './schema';
+import { IndexedDbTennisRepository } from './repositories';
 
 const stamp = { createdAt: '2026-01-01', updatedAt: '2026-01-01' };
 const bundle = (id: string, status: 'active' | 'completed' = 'active'): MatchBundle => ({
@@ -12,6 +14,7 @@ const bundle = (id: string, status: 'active' | 'completed' = 'active'): MatchBun
   games: [2, 1].map(ordinal => ({ ...stamp, id: `${id}-g${ordinal}`, setId: `${id}-s1`, ordinal, server: 'player', result: 'won', score: null, netErrors: 0, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null })),
   tieBreaks: [{ ...stamp, id: `${id}-t`, setId: `${id}-s1`, kind: 'standard', playerPoints: 7, opponentPoints: 0, netErrors: null, wideErrors: 0, longErrors: null, doubleFaults: null }],
 });
+const draftFixture = (matchId: string): VoiceDraft => ({ ...stamp, id: 'd', matchId, setId: `${matchId}-s2`, confirmationId: 'c', dataVersion: 1, recording: null, mimeType: null, transcripts: [], parsedDraft: null, state: 'recorded', error: null });
 let cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { await Promise.all(cleanup.map(fn => fn())); cleanup = []; });
 async function setup() {
@@ -23,6 +26,87 @@ async function setup() {
 function indexedDBDelete(name: string) { return new Promise<void>((resolve, reject) => { const request = indexedDB.deleteDatabase(name); request.onsuccess = () => resolve(); request.onerror = () => reject(request.error); }); }
 
 describe('IndexedDB repository', () => {
+  it('round trips rich draft content without changing nulls, zeroes or audio', async () => {
+    const repo = await setup(); await repo.saveMatchBundle(bundle('m'));
+    const draft: VoiceDraft = { ...draftFixture('m'), recording: new Blob(['audio'], { type: 'audio/mp4' }), mimeType: 'audio/mp4', transcripts: [{ text: 'first', provider: 'openai', model: 'test', timestamp: 'now' }, { text: 'second', provider: 'openai', model: 'test', timestamp: 'later' }], parsedDraft: { version: 1, warnings: ['warning'], games: [{ server: 'player', result: 'won', netErrors: 0, wideErrors: null, longErrors: null, doubleFaults: 0, failedReturns: null }] }, state: 'waiting-retry', error: { code: 'network', message: 'retry' } };
+    await repo.saveDraft(draft);
+    const saved = await repo.getDraft('d');
+    expect(saved).toEqual(draft);
+    expect(await saved?.recording?.text()).toBe('audio');
+    await repo.saveMatchBundle(bundle('m'));
+    expect(await repo.getDraft('d')).toEqual(draft);
+  });
+  it('rolls back bundle writes and marker on failure before draft deletion', async () => {
+    const name = `rollback-${crypto.randomUUID()}`;
+    const db = new TennisDatabase(name); await db.open();
+    const repo = new IndexedDbTennisRepository(db, null, () => { throw new Error('injected'); });
+    cleanup.push(async () => { repo.close(); await indexedDBDelete(name); });
+    const initial = bundle('m'); await repo.saveMatchBundle(initial);
+    const draft = { ...draftFixture('m'), recording: new Blob(['audio']) }; await repo.saveDraft(draft);
+    const before = await repo.getMatchBundle('m');
+    await expect(repo.confirmDraft('d', 'c', { ...initial, games: [] }, 'now')).rejects.toThrow('injected');
+    expect(await repo.getMatchBundle('m')).toEqual(before);
+    expect(await repo.getDraft('d')).toEqual(draft);
+    expect(await (await repo.getDraft('d'))?.recording?.text()).toBe('audio');
+    expect(await db.metadata.get('draft-confirmation:c')).toBeUndefined();
+  });
+  it('serializes confirmation across separate repository instances', async () => {
+    const name = `race-${crypto.randomUUID()}`;
+    const a = await openDatabase(name); const b = await openDatabase(name);
+    cleanup.push(async () => { a.close(); b.close(); await indexedDBDelete(name); });
+    const initial = bundle('m'); await a.saveMatchBundle(initial); await a.saveDraft(draftFixture('m'));
+    const results = await Promise.all([a.confirmDraft('d', 'c', initial, 'now'), b.confirmDraft('d', 'c', initial, 'now')]);
+    expect(results.map(r => r.status).sort()).toEqual(['alreadyConfirmed', 'confirmed']);
+    expect((await a.getMatchBundle('m'))?.games).toHaveLength(2);
+  });
+  it('rejects wrong bindings, missing drafts, invalid relationships and marker collisions', async () => {
+    const repo = await setup(); const initial = bundle('m'); await repo.saveMatchBundle(initial); await repo.saveDraft(draftFixture('m'));
+    await expect(repo.confirmDraft('missing', 'c', initial, 'now')).rejects.toThrow();
+    await expect(repo.confirmDraft('d', 'wrong', initial, 'now')).rejects.toThrow();
+    await expect(repo.confirmDraft('d', 'c', bundle('other'), 'now')).rejects.toThrow();
+    await expect(repo.confirmDraft('d', 'c', { ...initial, games: [{ ...initial.games[0], setId: 'missing' }] }, 'now')).rejects.toThrow();
+    expect(await repo.getDraft('d')).toBeDefined();
+    await repo.confirmDraft('d', 'c', initial, 'now');
+    await repo.saveMatchBundle(initial);
+    expect(await repo.confirmDraft('d', 'c', initial, 'later')).toEqual({ status: 'alreadyConfirmed' });
+    await expect(repo.confirmDraft('d', 'other', initial, 'now')).rejects.toThrow();
+    await expect(repo.confirmDraft('other', 'c', initial, 'now')).rejects.toThrow(/marker/i);
+    await expect(repo.confirmDraft('d', 'c', bundle('other'), 'now')).rejects.toThrow(/marker/i);
+  });
+  it('rejects a malformed marker instead of treating it as a confirmed retry', async () => {
+    const name = `malformed-${crypto.randomUUID()}`;
+    const repo = await openDatabase(name);
+    const db = new TennisDatabase(name); await db.open();
+    cleanup.push(async () => { db.close(); repo.close(); await indexedDBDelete(name); });
+    await db.metadata.put({ key: 'draft-confirmation:c', value: { draftId: 'd', matchId: 'm', confirmedAt: '' } });
+    await expect(repo.confirmDraft('d', 'c', bundle('m'), 'now')).rejects.toThrow(/marker/i);
+  });
+  it('rejects an empty confirmation timestamp without writing the bundle', async () => {
+    const repo = await setup(); const initial = bundle('m');
+    await repo.saveMatchBundle(initial); await repo.saveDraft(draftFixture('m'));
+    await expect(repo.confirmDraft('d', 'c', { ...initial, games: [] }, '')).rejects.toThrow();
+    expect(await repo.getDraft('d')).toBeDefined();
+    expect((await repo.getMatchBundle('m'))?.games).toHaveLength(2);
+  });
+  it('confirms a draft once and remembers the confirmation after reopening', async () => {
+    const name = `confirmation-${crypto.randomUUID()}`;
+    const repo = await openDatabase(name);
+    cleanup.push(async () => { repo.close(); await indexedDBDelete(name); });
+    const initial = bundle('m');
+    await repo.saveMatchBundle(initial);
+    const draft = { ...stamp, id: 'd', matchId: 'm', setId: 'm-s2', confirmationId: 'c', dataVersion: 1 as const, recording: new Blob(['audio'], { type: 'audio/mp4' }), mimeType: 'audio/mp4', transcripts: [{ text: 'hello', provider: 'openai', model: 'test', timestamp: stamp.createdAt }], parsedDraft: { version: 1 as const, games: [], warnings: [] }, state: 'ready' as const, error: null };
+    await repo.saveDraft(draft);
+    expect(await repo.getDraft('d')).toEqual(draft);
+    const prepared = { ...initial, games: [...initial.games, { ...initial.games[0], id: 'new-game', setId: 'm-s2' }] };
+    expect(await repo.confirmDraft('d', 'c', prepared, 'now')).toEqual({ status: 'confirmed' });
+    expect(await repo.getDraft('d')).toBeUndefined();
+    repo.close();
+    const reopened = await openDatabase(name);
+    try {
+      expect(await reopened.confirmDraft('d', 'c', prepared, 'later')).toEqual({ status: 'alreadyConfirmed' });
+      expect((await reopened.getMatchBundle('m'))?.games).toHaveLength(3);
+    } finally { reopened.close(); }
+  });
   it('round trips ordered bundles with nulls, zeroes and reusable opponents', async () => {
     const repo = await setup();
     await repo.saveMatchBundle(bundle('m'));
@@ -83,7 +167,7 @@ describe('IndexedDB repository', () => {
   it('persists pending recording blobs', async () => {
     const repo = await setup(); const recording = new Blob(['audio'], { type: 'audio/webm' });
     await repo.saveMatchBundle(bundle('m'));
-    await repo.saveDraft({ ...stamp, id: 'd', matchId: 'm', transcript: '', dataVersion: 1, recording });
+    await repo.saveDraft({ ...draftFixture('m'), recording });
     const draft = await repo.getDraft('d');
     expect(await draft?.recording?.text()).toBe('audio');
     expect(draft?.recording?.type).toBe('audio/webm');
@@ -91,7 +175,7 @@ describe('IndexedDB repository', () => {
   });
   it('rejects drafts without a parent, including saves queued after deletion', async () => {
     const repo = await setup();
-    const draft = { ...stamp, id: 'd', matchId: 'm', transcript: '', dataVersion: 1 };
+    const draft = draftFixture('m');
     await expect(repo.saveDraft(draft)).rejects.toThrow();
     await repo.saveMatchBundle(bundle('m'));
     await repo.saveDraft(draft);
@@ -111,7 +195,7 @@ describe('IndexedDB repository', () => {
   it.each(['opponent', 'set parent', 'game parent', 'tie-break parent', 'tie-break link', 'missing tie-break', 'draft parent'])('rejects a replacement with broken %s integrity', async broken => {
     const repo = await setup(); await repo.saveMatchBundle(bundle('original'));
     const item = bundle('a', 'completed');
-    const snapshot: DatabaseSnapshot = { dataVersion: 1, opponents: [item.opponent], matches: [item.match], sets: item.sets, games: item.games, tieBreaks: item.tieBreaks, voiceDrafts: [{ ...stamp, id: 'd', matchId: 'a', transcript: '', dataVersion: 1 }] };
+    const snapshot: DatabaseSnapshot = { dataVersion: 1, opponents: [item.opponent], matches: [item.match], sets: item.sets, games: item.games, tieBreaks: item.tieBreaks, voiceDrafts: [draftFixture('a')] };
     switch (broken) {
       case 'opponent': snapshot.matches[0].opponentId = 'missing'; break;
       case 'set parent': snapshot.sets[0].matchId = 'missing'; break;
@@ -127,7 +211,7 @@ describe('IndexedDB repository', () => {
   });
   it('accepts a structurally connected replacement including a draft', async () => {
     const repo = await setup(); const item = bundle('a');
-    const draft = { ...stamp, id: 'd', matchId: 'a', transcript: '', dataVersion: 1 };
+    const draft = draftFixture('a');
     await repo.replaceAll({ dataVersion: 1, opponents: [item.opponent], matches: [item.match], sets: item.sets, games: item.games, tieBreaks: item.tieBreaks, voiceDrafts: [draft] });
     expect((await repo.getActiveMatch())?.match.id).toBe('a');
     expect(await repo.getDraft('d')).toEqual(draft);

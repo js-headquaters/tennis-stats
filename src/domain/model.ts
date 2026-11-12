@@ -15,6 +15,8 @@ export type GameScore = { player: '0' | '15' | '30' | '40' | 'AD'; opponent: '0'
 export interface Game extends PersistedEntity { setId: string; ordinal: number; server: Server; result: MatchResult; score: GameScore | null; netErrors: number | null; wideErrors: number | null; longErrors: number | null; doubleFaults: number | null; failedReturns: number | null }
 export type TieBreakKind = 'standard' | 'super';
 export interface TieBreak extends PersistedEntity { setId: string; kind: TieBreakKind; playerPoints: number; opponentPoints: number; netErrors: number | null; wideErrors: number | null; longErrors: number | null; doubleFaults: number | null }
-export interface VoiceDraft extends PersistedEntity { matchId: string; transcript: string; dataVersion: number; recording?: Blob | null }
+export interface DraftGame { server: Server; result: MatchResult; netErrors: number | null; wideErrors: number | null; longErrors: number | null; doubleFaults: number | null; failedReturns: number | null }
+export interface ParsedDraft { version: 1; games: DraftGame[]; warnings: string[] }
+export interface VoiceDraft extends PersistedEntity { matchId: string; setId: string; confirmationId: string; dataVersion: 1; recording: Blob | null; mimeType: string | null; transcripts: Array<{ text: string; provider: string; model: string; timestamp: string }>; parsedDraft: ParsedDraft | null; state: 'recorded' | 'processing' | 'waiting-retry' | 'ready' | 'error' | 'confirming'; error: { code: string; message: string } | null }
 export interface MatchBundle { match: Match; opponent: Opponent; sets: TennisSet[]; games: Game[]; tieBreaks: TieBreak[] }
 export interface DatabaseSnapshot { dataVersion: number; matches: Match[]; opponents: Opponent[]; sets: TennisSet[]; games: Game[]; tieBreaks: TieBreak[]; voiceDrafts: VoiceDraft[] }

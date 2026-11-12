@@ -33,10 +33,11 @@ it('treats a null migration throw as recovery and rejects every write', async ()
     expect(repo.recoveryError).toBeInstanceOf(Error);
     expect(await repo.listOpponents()).toEqual([opponent]);
     const match = { id: 'm', opponentId: 'o', playedAt: 'old', format: 'oneSet' as const, firstServer: 'player' as const, status: 'active' as const, comments: null, createdAt: 'old', updatedAt: 'old' };
-    const draft = { id: 'd', matchId: 'm', transcript: '', dataVersion: 1, createdAt: 'old', updatedAt: 'old' };
+    const draft = { id: 'd', matchId: 'm', setId: 's', confirmationId: 'c', dataVersion: 1 as const, recording: null, mimeType: null, transcripts: [], parsedDraft: null, state: 'recorded' as const, error: null, createdAt: 'old', updatedAt: 'old' };
     const writes = [
       () => repo.saveMatchBundle({ match, opponent, sets: [], games: [], tieBreaks: [] }),
       () => repo.deleteMatch('m'), () => repo.saveDraft(draft), () => repo.deleteDraft('d'),
+      () => repo.confirmDraft('d', 'c', { match, opponent, sets: [], games: [], tieBreaks: [] }, 'now'),
       () => repo.replaceAll({ dataVersion: 1, opponents: [], matches: [], sets: [], games: [], tieBreaks: [], voiceDrafts: [] }),
     ];
     for (const write of writes) await expect(write()).rejects.toThrow(/read.only/i);

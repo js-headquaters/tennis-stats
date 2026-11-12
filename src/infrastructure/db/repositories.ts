@@ -3,8 +3,14 @@ import type { DatabaseSnapshot, Match, MatchBundle, VoiceDraft } from '../../dom
 import { DATA_VERSION } from './migrations';
 import type { TennisDatabase } from './schema';
 
+function isMarker(value: unknown): value is { draftId: string; matchId: string; confirmedAt: string } {
+  if (!value || typeof value !== 'object') return false;
+  const marker = value as Record<string, unknown>;
+  return typeof marker.draftId === 'string' && !!marker.draftId && typeof marker.matchId === 'string' && !!marker.matchId && typeof marker.confirmedAt === 'string' && !!marker.confirmedAt;
+}
+
 export class IndexedDbTennisRepository implements TennisRepository {
-  constructor(private db: TennisDatabase, readonly recoveryError: unknown | null) {}
+  constructor(private db: TennisDatabase, readonly recoveryError: unknown | null, private confirmationHook?: () => void) {}
   private writable() { if (this.recoveryError !== null) throw new Error('Database is in read-only recovery mode'); }
   close() { this.db.close(); }
   async listOpponents() { return this.db.opponents.toArray(); }
@@ -40,12 +46,41 @@ export class IndexedDbTennisRepository implements TennisRepository {
   async saveMatchBundle(bundle: MatchBundle) {
     this.writable();
     await this.db.transaction('rw', this.db.matches, this.db.opponents, this.db.sets, this.db.games, this.db.tieBreaks, async () => {
+      await this.writeBundle(bundle);
+    });
+  }
+  private async writeBundle(bundle: MatchBundle) {
       const { match, opponent, sets, games, tieBreaks } = bundle;
       if (match.opponentId !== opponent.id || sets.some(s => s.matchId !== match.id) || games.some(g => !sets.some(s => s.id === g.setId)) || tieBreaks.some(t => !sets.some(s => s.id === t.setId && s.tieBreakId === t.id)) || sets.some(s => s.tieBreakId !== null && !tieBreaks.some(t => t.id === s.tieBreakId && t.setId === s.id))) throw new Error('Invalid match bundle associations');
       if (match.status === 'active' && (await this.db.matches.where('status').equals('active').toArray()).some(m => m.id !== match.id)) throw new Error('An active match already exists');
       await this.removeChildren(match.id);
       await this.db.opponents.put(opponent); await this.db.matches.put(match);
       await this.db.sets.bulkAdd(sets); await this.db.games.bulkAdd(games); await this.db.tieBreaks.bulkAdd(tieBreaks);
+  }
+  async confirmDraft(draftId: string, confirmationId: string, bundle: MatchBundle, confirmedAt: string): Promise<{ status: 'confirmed' | 'alreadyConfirmed' }> {
+    this.writable();
+    return this.db.transaction('rw', [this.db.matches, this.db.opponents, this.db.sets, this.db.games, this.db.tieBreaks, this.db.drafts, this.db.metadata], async () => {
+      const key = `draft-confirmation:${confirmationId}`;
+      const marker = (await this.db.metadata.get(key))?.value;
+      if (marker !== undefined) {
+        if (!isMarker(marker) || marker.draftId !== draftId || marker.matchId !== bundle.match.id) throw new Error('Confirmation marker collision');
+        return { status: 'alreadyConfirmed' as const };
+      }
+      if (!draftId || !confirmationId || !confirmedAt) throw new Error('Invalid draft confirmation');
+      const draft = await this.db.drafts.get(draftId);
+      if (!draft || draft.confirmationId !== confirmationId || draft.matchId !== bundle.match.id || !await this.db.matches.get(draft.matchId)) throw new Error('Invalid draft confirmation');
+      const set = await this.db.sets.get(draft.setId);
+      if (!set || set.matchId !== draft.matchId || !bundle.sets.some(s => s.id === draft.setId && s.matchId === draft.matchId)) throw new Error('Invalid draft set');
+      for (const item of await this.db.metadata.toArray()) {
+        if (!item.key.startsWith('draft-confirmation:')) continue;
+        if (!isMarker(item.value)) throw new Error('Invalid confirmation marker');
+        if (item.value.draftId === draftId) throw new Error('Draft already confirmed with another marker');
+      }
+      await this.writeBundle(bundle);
+      await this.db.metadata.add({ key, value: { draftId, matchId: draft.matchId, confirmedAt } });
+      this.confirmationHook?.();
+      await this.db.drafts.delete(draftId);
+      return { status: 'confirmed' as const };
     });
   }
   async abandonMatch(id: string, updatedAt: string) {

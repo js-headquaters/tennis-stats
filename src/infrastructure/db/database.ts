@@ -9,6 +9,7 @@ export async function openDatabase(name = 'tennis-stats', migrate = runDataMigra
   try {
     await db.transaction('rw', db.tables, async () => {
       const version = (await db.metadata.get('dataVersion'))?.value ?? 0;
+      if (typeof version !== 'number') throw new Error('Invalid data version');
       await migrate(db, version, DATA_VERSION);
     });
   } catch (error) { recoveryError = error instanceof Error ? error : new Error('Data migration failed', { cause: error }); }
