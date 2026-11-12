@@ -554,3 +554,79 @@ Before calling the project complete:
 - Export a populated backup, clear/replace local data, import it, and compare match/game/stat counts.
 - Confirm no API key appears in repository history, built assets, browser console output, exported backup, service-worker cache, or test artifacts.
 - Confirm GitHub Pages deploys only the verified `develop` artifact and direct/reloaded hash routes work at `/tennis-stats/`.
+
+---
+
+## Post-review Fix Tasks (added after the final whole-branch review)
+
+> Origin: the final whole-branch review found no Critical defects but four Important gaps and cheap fixes. Each task is small and independent; execute in order with the same subagent-driven loop. Constraint from the user: subagents run on Sonnet 5.5 or lower only. No `git push`. Findings referenced (I-n / M-n / T-n) come from the ledger `.superpowers/sdd/2026-11-11-tennis-stats-pwa/progress.md`.
+
+### Task 15: Discard Voice Drafts and Stop Persisted Drafts Blocking Updates (I-1)
+
+**Files:** Modify `src/application/draftService.ts`, `src/application/draftService.test.ts`, `src/features/voice/DraftReviewPage.tsx` (+ test), `src/app/workGuard.ts` (+ test), `src/components/UpdatePrompt.tsx` (+ test).
+**Note:** an earlier interrupted attempt left uncommitted edits in `draftService.ts`, `draftService.test.ts`, `ports.ts`; audit them with `git diff` first and keep or discard them deliberately.
+
+- [ ] **Step 1: Failing tests** — a draft-service `discardDraft(id)` that deletes the draft and its audio (idempotent, refused in read-only recovery); DraftReviewPage "Discard draft" with explicit confirmation step, disabled in recovery; an unappliable draft (`applicable()` fails because the set already completed) shows an explanatory message instead of a generic error and offers Discard; work guard ignores persisted `processing`/`confirming` rows (only in-session registry work blocks "Reload to update").
+- [ ] **Step 2: Implement** the service function, the page control (44px, text states), and the guard change; supersede the Task 12 ruling in the report.
+- [ ] **Step 3: Verify and commit** — focused tests, `npm test`, `npm run typecheck`, `npm run lint`; commit `fix: make voice drafts discardable`.
+
+### Task 16: Cancelable AI Processing with Timeout (I-2)
+
+**Files:** Modify `src/application/draftService.ts` (+ test), `src/features/voice/DraftReviewPage.tsx` (+ test).
+
+- [ ] **Step 1: Failing tests** — "Cancel processing" aborts the in-flight provider call, leaves a retryable `waiting-retry` draft with audio kept; a bounded injectable timeout (default 60 s per provider call) yields `waiting-retry` with a safe message; unmounting during processing aborts but releases an owned repository only after the in-flight operation settles so the `waiting-retry` state persists; no duplicate games.
+- [ ] **Step 2: Implement** cancel control (44px), timeout, and ordered cleanup.
+- [ ] **Step 3: Verify and commit** — `fix: allow cancelling and bounding ai processing`.
+
+### Task 17: Minimal Parser Context (I-4)
+
+**Files:** Modify `src/application/ports.ts`, `src/application/draftService.ts`, `src/infrastructure/ai/schemas.ts`, `openAiParser.ts`, `anthropicParser.ts`, tests.
+
+- [ ] **Step 1: Failing tests** — the parser request carries only format, current set score, game count in the current set, expected next server and the existing draft; sentinel opponent name, comments and unrelated games never appear in either provider's request body.
+- [ ] **Step 2: Implement** the projection type and adapter changes; update fakes and fixtures.
+- [ ] **Step 3: Verify and commit** — `fix: send minimal match context to the parser`.
+
+### Task 18: Settings Application Section (I-3)
+
+**Files:** Create `src/features/settings/ApplicationSection.tsx` (+ test); modify `SettingsPage.tsx`.
+
+- [ ] **Step 1: Failing tests** — read-only section showing app version, data/schema version, online/offline state, installed/standalone state, and service-worker/offline-ready state when available; injectable sources; independent of the Settings busy lock; no secrets.
+- [ ] **Step 2: Implement and wire into SettingsPage.**
+- [ ] **Step 3: Verify and commit** — `feat: show application status in settings`.
+
+### Task 19: Finalise Sets Completed by Corrections (M-10)
+
+**Files:** Modify `src/application/matchService.ts` (+ test), `src/features/matches/MatchSetDetails.tsx` (+ test), `tests/e2e/manual-match.spec.ts`.
+
+- [ ] **Step 1: Failing tests** — a correction that makes the active set complete finalises set status and match completion through the same helper `addGames` uses (no duplicated logic), still through preview-and-confirm, never reactivating completed/abandoned matches; the details page derives the set-status label from the evaluation, never "Score 5–5 · No result · Set completed".
+- [ ] **Step 2: Implement; narrow the e2e assertion that locked in the stale status.**
+- [ ] **Step 3: Verify and commit** — `fix: finalise sets completed by corrections`.
+
+### Task 20: Routing, Link Encoding, and Touch Targets (M-2, M-4, M-5)
+
+**Files:** Modify `src/app/router.tsx`, `src/styles/global.css`, `src/features/settings/AiSettingsSection.tsx`, link call sites in `MatchHistoryPage.tsx`, `DashboardPage.tsx`, `StartMatchPage.tsx`, tests.
+
+- [ ] **Step 1: Failing tests** — unknown hash route and render errors show a friendly not-found/error page with Home/Matches/Settings links (44px); match ids containing `/` and `#` round-trip through links; AI settings controls and live-match load-error controls meet 44px against the real stylesheet.
+- [ ] **Step 2: Implement (shared route helper only if it removes duplication).**
+- [ ] **Step 3: Verify and commit** — `fix: harden routing links and touch targets`.
+
+### Task 21: Recovery Export and Backup Opponent Validation (M-9, T11-#2)
+
+**Files:** Modify `src/infrastructure/db/repositories.ts`, `src/application/backupService.ts`, tests; extend `tests/e2e/backup-migration.spec.ts` only if cheap.
+
+- [ ] **Step 1: Failing tests** — `snapshot()`/export works in `invalid-data-version` recovery (reads only); import rejects, with a reported reason, an opponent whose `normalizedName` differs from the app's normalisation of `name`.
+- [ ] **Step 2: Implement.**
+- [ ] **Step 3: Verify and commit** — `fix: export in invalid-data-version recovery and validate opponent names`.
+
+### Task 22: Smoke Guide, E2E Port Constant, and Repository Hygiene (M-1, T13-#7, M-14)
+
+**Files:** Modify `docs/ios-smoke-test.md`, `playwright.config.ts`, `tests/e2e/offline-pwa.spec.ts`, `tests/e2e/start-match.spec.ts`, `.gitignore`, `package.json`, `README.md`.
+
+- [ ] **Step 1: Correct the guide against the real UI** — "Record with voice" label and auto-processing; no "Back online" after a cold start; dismissed update prompt stays dismissed; add Private Browsing row; reflect Discard/Cancel controls, Settings Application section, and updates no longer blocked by persisted drafts.
+- [ ] **Step 2: Export the Playwright preview port from `playwright.config.ts` and use it in the specs.**
+- [ ] **Step 3: Hygiene** — `git rm --cached` the tracked `.superpowers/.../task-2-report.md` (keep file on disk); add `coverage/` to `.gitignore`; remove meaningless `package.json` scaffold leftovers; README "structured points" → "games".
+- [ ] **Step 4: Full release gate** — `npm run typecheck && npm run lint && npm test && npm run build && npm run verify:pwa`, then full Playwright on chromium and webkit; commit `docs: correct ios smoke guide and repo hygiene`.
+
+### Deferred (not scheduled)
+
+Replace/clear draft-filter race across tabs (T11 #1); import timestamp and cross-record validation (T11 #4/#5); raw UUIDs in conflict messages (M-3); mid-recording recorder failure surfacing (M-6); upload filename for aac/ogg (M-7); generic HTTP error text and unverified `gpt-transcribe` model id (M-8); `endSetEarly` after format change on an active match (M-11); duplicated logic and dead code (M-12/M-13); WebKit-under-service-worker tests reaching real provider hosts (T13 #2); `orientation: 'portrait'` decision (user); action major-tag re-check before first push.
