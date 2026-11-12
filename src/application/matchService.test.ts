@@ -412,3 +412,26 @@ describe('same-set correction dependencies', () => {
     expect(result.bundle.games.filter(g => g.id !== edited.id)).toEqual(before.games.filter(g => g.id !== edited.id));
   });
 });
+
+describe('post-completion chronology conflicts', () => {
+  it.each(['update', 'delete'] as const)('%s identifies games after earliest completion with the same winner', async operation => {
+    const deps = await setup(); const start = await startMatch({ ...input, format:'openPractice' }, deps);
+    const metrics = { netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns:null };
+    const results = ['won','lost','won','lost','won','lost','won','lost','won','won'] as const;
+    const before = await addGames(start.match.id, results.map(result => ({ ...metrics, result })), deps);
+    if (operation === 'delete') {
+      before.games[1].result = 'won';
+      before.games.push({ ...before.games[9], id:'extra-game', ordinal:11, server:'player' });
+      await deps.repository.saveMatchBundle(before);
+    }
+    const edited = before.games[operation === 'update' ? 1 : 3];
+    const post = operation === 'update' ? [before.games[9]] : [before.games[9], before.games[10]];
+    const save = vi.spyOn(deps.repository, 'saveMatchBundle');
+    const run = (confirmed = false) => operation === 'update' ? updateGame(edited.id, { result:'won' }, deps, confirmed) : deleteGame(edited.id, deps, confirmed);
+    const preview = await run(); expect(save).not.toHaveBeenCalled(); expect(preview.bundle).toEqual(before);
+    for (const game of post) expect(preview.conflicts).toEqual(expect.arrayContaining([expect.objectContaining({ type:'structureInvalidated', setId:edited.setId, gameId:game.id })]));
+    const result = await run(true); expect(save).toHaveBeenCalledTimes(1);
+    expect(result.bundle.sets).toEqual(before.sets); expect(result.bundle.tieBreaks).toEqual(before.tieBreaks);
+    expect(result.bundle.games.filter(g => g.id !== edited.id)).toEqual(before.games.filter(g => g.id !== edited.id));
+  });
+});

@@ -205,7 +205,15 @@ function correctionConflicts(before: MatchBundle, after: MatchBundle, corrected:
       }
     }
     const chronological = [...games].sort((a, b) => a.ordinal - b.ordinal);
-    if (chronological.some((_, index) => index < chronological.length - 1 && evaluateSet(chronological.slice(0, index + 1), null).completed)) conflicts.push({ type: 'structureInvalidated', message: `Set ${set.ordinal} has games after it ended` });
+    const completionIndex = set.kind === 'standard' ? chronological.findIndex((_, index) => evaluateSet(chronological.slice(0, index + 1), null).completed) : -1;
+    if (completionIndex >= 0) {
+      for (const game of chronological.slice(completionIndex + 1)) {
+        const existing = conflicts.find(item => item.type === 'structureInvalidated' && item.setId === set.id && item.gameId === game.id);
+        const message = `Game ${game.id} in set ${set.ordinal} is after the set ended`;
+        if (existing) existing.message = message;
+        else conflicts.push({ type: 'structureInvalidated', setId: set.id, gameId: game.id, message });
+      }
+    }
     if (tie?.kind === 'standard' && !eligible(games)) conflicts.push({ type: 'structureInvalidated', setId: set.id, tieBreakId: tie.id, message: `Set ${set.ordinal} no longer qualifies for tie-break ${tie.id}` });
   }
   const evaluate = (bundle: MatchBundle) => evaluateMatch(bundle.match.format, bundle.sets.filter(s => s.status !== 'unfinished').map(s => setEvaluation(bundle, s)));

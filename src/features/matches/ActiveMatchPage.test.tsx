@@ -147,3 +147,22 @@ it.each(['update', 'delete'] as const)('shows same-set tie-break and later games
   await waitFor(() => expect(save).toHaveBeenCalledTimes(1)); expect(data().tieBreaks).toEqual(b.tieBreaks);
   expect(data().games.filter(g => g.id !== 'same-game-2')).toEqual(b.games.filter(g => g.id !== 'same-game-2'));
 });
+
+it('identifies every game after early completion in correction confirmation', async () => {
+  const b = fixture(); b.match.format = 'openPractice'; b.sets[0].status = 'completed';
+  b.sets.push({ ...b.sets[0], id:'next-set', ordinal:2, status:'active' });
+  const results = ['won','lost','won','lost','won','lost','won','lost','won','won'] as const;
+  b.games = results.map((result,i) => ({ id:`chronology-${i+1}`, setId:'s', ordinal:i+1, server:i % 2 ? 'opponent' : 'player', result, score:null, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns:null, createdAt:now, updatedAt:now }));
+  const { save } = setup(b); await screen.findByText(/Alex/); fireEvent.click(screen.getByRole('button', { name:'Edit game 2' }));
+  fireEvent.change(screen.getByLabelText('Result'), { target:{ value:'won' } }); fireEvent.click(screen.getByRole('button', { name:'Save game' }));
+  const region = await screen.findByRole('region', { name:/affected records/i }); expect(region).toHaveTextContent('chronology-10'); expect(save).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name:'Confirm affected records' })); await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+});
+it('shows both post-completion games and server warnings after deleting an earlier game', async () => {
+  const b = fixture(); b.match.format = 'openPractice'; b.sets[0].status = 'completed';
+  b.sets.push({ ...b.sets[0], id:'next-set', ordinal:2, status:'active' });
+  const results = ['won','won','won','lost','won','lost','won','lost','won','won','won'] as const;
+  b.games = results.map((result,i) => ({ id:`post-${i+1}`, setId:'s', ordinal:i+1, server:i % 2 ? 'opponent' : 'player', result, score:null, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns:null, createdAt:now, updatedAt:now }));
+  const { save } = setup(b); await screen.findByText(/Alex/); fireEvent.click(screen.getByRole('button', { name:'Delete game 4' }));
+  const region = await screen.findByRole('region', { name:/affected records/i }); expect(region).toHaveTextContent('post-10'); expect(region).toHaveTextContent('post-11'); expect(region).toHaveTextContent('expected server shifts'); expect(save).not.toHaveBeenCalled();
+});
