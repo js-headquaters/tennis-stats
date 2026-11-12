@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { Clock, IdGenerator, StatisticsParser, TennisRepository, TranscriptionProvider } from './ports';
+import type { Clock, IdGenerator, ParserMatchContext, StatisticsParser, TennisRepository, TranscriptionProvider } from './ports';
 import type { DraftGame, MatchBundle, VoiceDraft } from '../domain/model';
 import { validateGame } from '../domain/validation';
 import { nextGameServer, prepareGames } from './matchService';
@@ -36,6 +36,15 @@ export function draftFitsMatch(bundle: MatchBundle | undefined, draft: Pick<Voic
   if (!bundle || bundle.match.status !== 'active' || !set || set.matchId !== draft.matchId || set.status !== 'active' || set.kind !== 'standard') return false;
   const score = evaluateSet(bundle.games.filter(game => game.setId === set.id), bundle.tieBreaks.find(tie => tie.id === set.tieBreakId) ?? null);
   return !(score.completed || (score.playerGames === 6 && score.opponentGames === 6));
+}
+
+/** The minimal projection of `bundle` the parser may see for the draft's set (see `ParserMatchContext`). */
+export function parserContext(bundle: MatchBundle, setId: string): ParserMatchContext {
+  const set = bundle.sets.find(item => item.id === setId);
+  if (!set) throw new Error('Set not found');
+  const games = bundle.games.filter(game => game.setId === set.id);
+  const score = evaluateSet(games, bundle.tieBreaks.find(tie => tie.id === set.tieBreakId) ?? null);
+  return { format: bundle.match.format, setKind: set.kind, playerGames: score.playerGames, opponentGames: score.opponentGames, gamesRecorded: games.length, expectedNextServer: nextGameServer(bundle) };
 }
 
 export function createDraftService({ repository, transcriber, parser, clock, ids, isOnline, requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, scheduler = defaultScheduler }: Deps) {
@@ -109,7 +118,7 @@ export function createDraftService({ repository, transcriber, parser, clock, ids
     try {
       const transcript = current.transcripts.at(-1);
       if (!transcript) throw { code: 'invalid-response' };
-      const response = await bounded(signal, inner => parser.parse({ transcript: transcript.text, matchContext: bundle, expectedNext: nextGameServer(bundle), ...(current.parsedDraft ? { existingDraft: current.parsedDraft } : {}) }, inner));
+      const response = await bounded(signal, inner => parser.parse({ transcript: transcript.text, context: parserContext(bundle, current.setId), ...(current.parsedDraft ? { existingDraft: current.parsedDraft } : {}) }, inner));
       const validated = draftSchema.safeParse(response);
       if (!validated.success) throw { code: 'invalid-response' };
       parsed = validated.data;

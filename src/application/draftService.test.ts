@@ -2,8 +2,8 @@
 import 'fake-indexeddb/auto';
 import { describe, expect, it, vi } from 'vitest';
 import { openDatabase } from '../infrastructure/db/database';
-import { startMatch } from './matchService';
-import { createDraftService } from './draftService';
+import { addGames, startMatch, updateComments } from './matchService';
+import { createDraftService, parserContext } from './draftService';
 import type { StatisticsParser, TranscriptionProvider } from './ports';
 import { ReadOnlyRecoveryError } from './recovery';
 
@@ -203,7 +203,7 @@ describe('draft processing', () => {
     const audio = new Blob(['sound'], { type: 'audio/mp4' });
     const save = vi.spyOn(repository, 'saveDraft');
     transcriber.transcribe.mockImplementation(async () => { expect(save.mock.calls.at(-1)?.[0]).toMatchObject({ recording: audio, state: 'processing' }); return { text: 'won', provider: 'test', model: 'model' }; });
-    parser.parse.mockImplementation(async request => { expect(save.mock.calls.at(-1)?.[0].transcripts).toHaveLength(1); expect(request).toMatchObject({ transcript: 'won', expectedNext: 'player' }); return parsed; });
+    parser.parse.mockImplementation(async request => { expect(save.mock.calls.at(-1)?.[0].transcripts).toHaveLength(1); expect(request).toMatchObject({ transcript: 'won', context: expect.objectContaining({ expectedNextServer: 'player' }) }); return parsed; });
     const controller = new AbortController(); const signal = controller.signal;
     const result = await service.createDraftFromAudio({ matchId: match.match.id, setId: match.sets[0].id, audio, mimeType: 'audio/mp4' }, signal);
     expect(result).toMatchObject({ state: 'ready', parsedDraft: parsed });
@@ -424,5 +424,31 @@ describe('discarding drafts', () => {
     await service.discardDraft(draft.id);
     expect(await repository.getDraft(draft.id)).toBeUndefined();
     expect((await repository.getMatchBundle(match.match.id))?.games).toHaveLength(6);
+  });
+});
+
+describe('parser context projection', () => {
+  const game = (result: 'won' | 'lost', netErrors: number) => ({ result, netErrors, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null });
+  it('contains only format, set score, game count and expected server', async () => {
+    const { repository, match } = await setup();
+    const deps = { repository, ids: { next: () => `p-${++n}` }, clock };
+    await updateComments(match.match.id, 'SENTINEL-COMMENT', deps);
+    await addGames(match.match.id, [game('won', 424242), game('lost', 1), game('won', 2)], deps);
+    const bundle = (await repository.getMatchBundle(match.match.id))!;
+    const set = bundle.sets.at(-1)!;
+    const context = parserContext(bundle, set.id);
+    expect(context).toEqual({ format: 'twoSetsSuperTiebreak', setKind: 'standard', playerGames: 2, opponentGames: 1, gamesRecorded: 3, expectedNextServer: 'opponent' });
+    expect(JSON.stringify(context)).not.toMatch(/Alex|SENTINEL|424242|id-/);
+  });
+  it('projects a deciding super tie-break set as zero games', () => {
+    const bundle = { match: { id: 'm', opponentId: 'o', playedAt: 'x', format: 'twoSetsSuperTiebreak', firstServer: 'player', status: 'active', comments: 'SENTINEL-COMMENT', createdAt: 'x', updatedAt: 'x' }, opponent: { id: 'o', name: 'SENTINEL-OPPONENT-NAME', createdAt: 'x', updatedAt: 'x' }, sets: [{ id: 's3', matchId: 'm', ordinal: 3, kind: 'decidingSuperTiebreak', status: 'active', tieBreakId: null, createdAt: 'x', updatedAt: 'x' }], games: [], tieBreaks: [] };
+    expect(parserContext(bundle as never, 's3')).toEqual({ format: 'twoSetsSuperTiebreak', setKind: 'decidingSuperTiebreak', playerGames: 0, opponentGames: 0, gamesRecorded: 0, expectedNextServer: 'player' });
+  });
+  it('sends exactly the projection to the parser', async () => {
+    const { service, match, parser } = await setup();
+    await service.createDraftFromAudio({ matchId: match.match.id, setId: match.sets[0].id, audio: new Blob(['a']), mimeType: 'audio/mp4' }, new AbortController().signal).catch(() => {});
+    const request = parser.parse.mock.calls[0][0];
+    expect(request).toEqual({ transcript: 'won', context: { format: 'twoSetsSuperTiebreak', setKind: 'standard', playerGames: 0, opponentGames: 0, gamesRecorded: 0, expectedNextServer: 'player' } });
+    expect(JSON.stringify(request)).not.toContain('Alex');
   });
 });

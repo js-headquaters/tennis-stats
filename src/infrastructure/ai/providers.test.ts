@@ -21,7 +21,7 @@ it('rejects insecure or credential-bearing endpoints before sending keys', async
 it('sanitizes serialization errors and forged safe error diagnostics', async () => {
   const thrown = { toJSON() { throw new Error(key); } };
   for (const parser of [createOpenAiParser(config, vi.fn()), createAnthropicParser({ ...config, provider: 'anthropic' }, vi.fn())]) {
-    const error = await parser.parse({ transcript: '', matchContext: thrown }, new AbortController().signal).catch(reason => reason);
+    const error = await parser.parse({ transcript: '', context: thrown as never }, new AbortController().signal).catch(reason => reason);
     expect(String(error)).not.toContain(key); expect(JSON.stringify(error)).not.toContain(key);
   }
   const forged = new SafeProviderError('auth');
@@ -80,4 +80,19 @@ it('redacts provider errors, response bodies and console diagnostics', async () 
     catch (error) { expect(String(error)).not.toContain(key); expect(JSON.stringify(error)).not.toContain(key); }
   }
   expect(JSON.stringify(spy.mock.calls)).not.toContain(key); spy.mockRestore();
+});
+
+it('sends only the minimal parser context to both providers, never opponent, comments or game history', async () => {
+  const context = { format: 'bestOfThree', setKind: 'standard', playerGames: 3, opponentGames: 2, gamesRecorded: 5, expectedNextServer: 'opponent' } as const;
+  // A caller that wrongly passes the whole bundle must still not leak it.
+  const leaky = { transcript: 'won', context, existingDraft: draft, matchContext: { opponent: { name: 'SENTINEL-OPPONENT-NAME' }, match: { comments: 'SENTINEL-COMMENT' }, games: [{ id: 'SENTINEL-GAME-ID', netErrors: 987654 }] }, expectedNext: 'x' };
+  for (const provider of ['openai', 'anthropic'] as const) {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(provider === 'openai' ? { choices: [{ message: { content: JSON.stringify(draft) } }] } : { content: [{ type: 'text', text: JSON.stringify(draft) }] })));
+    const parser = provider === 'openai' ? createOpenAiParser(config, fetcher) : createAnthropicParser({ ...config, provider }, fetcher);
+    await parser.parse(leaky as never, new AbortController().signal);
+    const raw: string = fetcher.mock.calls[0][1].body; const body = JSON.parse(raw);
+    const user = JSON.parse(provider === 'openai' ? body.messages[1].content : body.messages[0].content);
+    expect(user).toEqual({ transcript: 'won', context, existingDraft: draft });
+    for (const sentinel of ['SENTINEL-OPPONENT-NAME', 'SENTINEL-COMMENT', 'SENTINEL-GAME-ID', '987654']) expect(raw).not.toContain(sentinel);
+  }
 });
