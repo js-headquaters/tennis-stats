@@ -598,9 +598,9 @@ Before calling the project complete:
 
 **Files:** Modify `src/application/matchService.ts` (+ test), `src/features/matches/MatchSetDetails.tsx` (+ test), `tests/e2e/manual-match.spec.ts`.
 
-- [ ] **Step 1: Failing tests** — a correction that makes the active set complete finalises set status and match completion through the same helper `addGames` uses (no duplicated logic), still through preview-and-confirm, never reactivating completed/abandoned matches; the details page derives the set-status label from the evaluation, never "Score 5–5 · No result · Set completed".
-- [ ] **Step 2: Implement; narrow the e2e assertion that locked in the stale status.**
-- [ ] **Step 3: Verify and commit** — `fix: finalise sets completed by corrections`.
+- [x] **Step 1: Failing tests** — a correction that makes the active set complete finalises set status and match completion through the same helper `addGames` uses (no duplicated logic), still through preview-and-confirm, never reactivating completed/abandoned matches; the details page derives the set-status label from the evaluation, never "Score 5–5 · No result · Set completed".
+- [x] **Step 2: Implement; narrow the e2e assertion that locked in the stale status.**
+- [x] **Step 3: Verify and commit** — `fix: finalise sets completed by corrections`.
 
 ### Task 20: Routing, Link Encoding, and Touch Targets (M-2, M-4, M-5)
 
