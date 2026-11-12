@@ -421,27 +421,27 @@ Run targeted tests, type checking, and linting; commit `feat: browse and edit ma
 **Interfaces:**
 - Produces: `exportBackup(repo): Promise<BackupV1>`; `previewImport(raw): ImportPreview`; `applyImport(preview, mode: "merge" | "replace", repo): Promise<ImportResult>`.
 
-- [ ] **Step 1: Write failing backup tests**
+- [x] **Step 1: Write failing backup tests**
 
 Assert deterministic versioned JSON, complete tennis/comments data, `null`/`0` preservation, and absence of keys/settings, pending audio, and service-worker state.
 
-- [ ] **Step 2: Write failing import tests**
+- [x] **Step 2: Write failing import tests**
 
 Assert validation before writes, v0-to-v1 in-memory migration, normalized opponent reconciliation, stable-ID conflict reporting, transactional merge/replace, unchanged current data after invalid input, and import summary counts.
 
-- [ ] **Step 3: Write failing Data Settings tests**
+- [x] **Step 3: Write failing Data Settings tests**
 
 Assert download, upload preview, merge/replace confirmation, clear-all typed confirmation, and secret exclusion messaging.
 
-- [ ] **Step 4: Run tests and verify failure**
+- [x] **Step 4: Run tests and verify failure**
 
 Run `npm test -- src/application/backupService.test.ts src/infrastructure/backup src/features/settings/DataSettingsSection.test.tsx`; expect failures.
 
-- [ ] **Step 5: Implement backup/restore and verify round trips**
+- [x] **Step 5: Implement backup/restore and verify round trips**
 
 Apply imports only after preview confirmation and inside repository transactions; produce a timestamped `tennis-stats-backup-v1-YYYY-MM-DD.json` filename.
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 Run targeted tests, type checking, and linting; commit `feat: add versioned local backups`.
 
