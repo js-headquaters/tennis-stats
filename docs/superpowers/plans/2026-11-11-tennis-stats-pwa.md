@@ -457,23 +457,23 @@ Run targeted tests, type checking, and linting; commit `feat: add versioned loca
 **Interfaces:**
 - Produces: installable manifest/service worker scoped to `/tennis-stats/`, explicit update prompt, connectivity status, cached shell with AI endpoints excluded.
 
-- [ ] **Step 1: Write failing lifecycle tests**
+- [x] **Step 1: Write failing lifecycle tests**
 
 Assert offline status, retryable draft messaging, explicit update acceptance (no surprise reload), and that an active recording/draft blocks immediate update activation until safely stored.
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run `npm test -- src/components/UpdatePrompt.test.tsx src/components/ConnectivityBanner.test.tsx`; expect failures.
 
-- [ ] **Step 3: Configure the PWA and cache exclusions**
+- [x] **Step 3: Configure the PWA and cache exclusions**
 
 Use `registerType: "prompt"`; cache only same-origin application assets/navigation, never provider hosts, request bodies, authorization headers, or API responses.
 
-- [ ] **Step 4: Write the real-iPhone smoke procedure**
+- [x] **Step 4: Write the real-iPhone smoke procedure**
 
 Document Safari and iOS Chrome checks for installation, microphone allow/deny, produced MIME type, lock/background interruption, offline manual entry, pending-recording retry, update prompt, and backup download/upload.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run `npm run build`, inspect the generated manifest/service worker scope, run component tests/typecheck/lint, and commit `feat: make tennis stats installable offline`.
 
