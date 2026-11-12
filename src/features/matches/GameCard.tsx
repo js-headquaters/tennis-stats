@@ -1,6 +1,8 @@
-import type { Game } from '../../domain/model';
+import type { Game, TieBreak } from '../../domain/model';
 
 export const metrics = [ ['netErrors', 'Net errors'], ['wideErrors', 'Wide errors'], ['longErrors', 'Long errors'], ['doubleFaults', 'Double faults'], ['failedReturns', 'Failed returns'] ] as const;
+/** Tie-breaks record every metric except failed returns. */
+export const tieBreakMetrics = metrics.slice(0, 4) as ReadonlyArray<readonly [keyof Pick<TieBreak, 'netErrors' | 'wideErrors' | 'longErrors' | 'doubleFaults'>, string]>;
 
 export default function GameCard({ game, onEdit, onDelete, disabled }: { game: Game; onEdit?: () => void; onDelete?: () => void; disabled?: boolean }) {
   return <article className="game-card" aria-label={`Game ${game.ordinal}`}>

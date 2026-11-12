@@ -5,6 +5,7 @@ import { evaluateMatch, evaluateSet, inferServer } from '../domain/scoring';
 
 export interface MatchServiceDeps { repository: TennisRepository; clock: Clock; ids: IdGenerator }
 export interface StartMatchInput { opponentName?: string; opponentId?: string; playedAt: string; format?: MatchFormat; firstServer: Server }
+const MATCH_FORMATS: readonly MatchFormat[] = ['twoSetsSuperTiebreak', 'openPractice', 'oneSet', 'bestOfThree'];
 const conflict = () => new Error('An active match exists. Complete or abandon it before starting another.');
 
 export async function startMatch(input: StartMatchInput, { repository, clock, ids }: MatchServiceDeps): Promise<MatchBundle> {
@@ -175,7 +176,7 @@ async function findGame(id: string, repository: TennisRepository): Promise<Match
   throw new Error('Game not found');
 }
 
-function correctionConflicts(before: MatchBundle, after: MatchBundle, corrected: Game): GameConflict[] {
+function correctionConflicts(before: MatchBundle, after: MatchBundle, corrected: Pick<Game, 'setId' | 'ordinal'> | null): GameConflict[] {
   const conflicts: GameConflict[] = [];
   const ordered = (bundle: MatchBundle) => [...bundle.games].sort((a, b) => (bundle.sets.find(s => s.id === a.setId)?.ordinal ?? 0) - (bundle.sets.find(s => s.id === b.setId)?.ordinal ?? 0) || a.ordinal - b.ordinal);
   const oldGames = ordered(before), newGames = ordered(after);
@@ -203,7 +204,7 @@ function correctionConflicts(before: MatchBundle, after: MatchBundle, corrected:
     const oldSetGames = before.games.filter(g => g.setId === set.id);
     const eligible = (items: Game[]) => items.filter(g => g.result === 'won').length === 6 && items.filter(g => g.result === 'lost').length === 6;
     const eligibilityChanged = tie?.kind === 'standard' && eligible(oldSetGames) !== eligible(games);
-    if (set.id === corrected.setId && (outcomeChanged || eligibilityChanged)) {
+    if (corrected && set.id === corrected.setId && (outcomeChanged || eligibilityChanged)) {
       if (tie && !(tie.kind === 'standard' && !eligible(games))) conflicts.push({ type: 'structureInvalidated', setId: set.id, tieBreakId: tie.id, message: `Tie-break ${tie.id} in set ${set.ordinal} is affected` });
       for (const game of oldSetGames.filter(item => item.ordinal > corrected.ordinal)) {
         if (!conflicts.some(item => item.type === 'serverChanged' && item.gameId === game.id)) conflicts.push({ type: 'structureInvalidated', setId: set.id, gameId: game.id, message: `Later game ${game.id} in set ${set.ordinal} is affected` });
@@ -251,6 +252,67 @@ export async function deleteGame(gameId: string, { repository, clock }: MatchSer
   const conflicts = correctionConflicts(before, bundle, before.games.find(item => item.id === gameId)!);
   if (conflicts.length && !confirmed) return { bundle: before, conflicts };
   bundle.match.updatedAt = clock.now();
+  await repository.saveMatchBundle(bundle);
+  return { bundle, conflicts };
+}
+
+export type CorrectionResult = { bundle: MatchBundle; conflicts: GameConflict[] };
+export interface MatchDetailsPatch { opponentName?: string; playedAt?: string; format?: MatchFormat }
+
+/** Edits match metadata in place. Never changes `status`; a format change that alters the derived outcome or orphans a super tie-break set needs confirmation. */
+export async function updateMatchDetails(id: string, patch: MatchDetailsPatch, { repository, clock, ids }: MatchServiceDeps, confirmed = false): Promise<CorrectionResult> {
+  const found = await repository.getMatchBundle(id);
+  if (!found) throw new Error('Match not found');
+  const before = structuredClone(found); const bundle = structuredClone(found);
+  const now = clock.now();
+  if (patch.playedAt !== undefined) {
+    if (!Number.isFinite(Date.parse(patch.playedAt))) throw new Error('Enter a valid date and time');
+    bundle.match.playedAt = patch.playedAt;
+  }
+  if (patch.format !== undefined) {
+    if (!MATCH_FORMATS.includes(patch.format)) throw new Error('Choose a valid match format');
+    bundle.match.format = patch.format;
+  }
+  if (patch.opponentName !== undefined) {
+    const name = normalizeOpponentName(patch.opponentName);
+    if (!name) throw new Error('Enter an opponent name');
+    if (name.toLowerCase() !== bundle.opponent.normalizedName.toLowerCase()) {
+      const existing = (await repository.listOpponents()).find(o => o.normalizedName.toLowerCase() === name.toLowerCase());
+      bundle.opponent = existing ?? { id: ids.next(), name, normalizedName: name.toLowerCase(), createdAt: now, updatedAt: now };
+      bundle.match.opponentId = bundle.opponent.id;
+    }
+  }
+  const conflicts = correctionConflicts(before, bundle, null);
+  if (bundle.match.format !== 'twoSetsSuperTiebreak') {
+    for (const set of bundle.sets.filter(item => item.kind === 'decidingSuperTiebreak')) conflicts.push({ type: 'structureInvalidated', setId: set.id, message: `Super tie-break set ${set.ordinal} does not fit the new format` });
+  }
+  if (conflicts.length && !confirmed) return { bundle: before, conflicts };
+  bundle.match.updatedAt = now;
+  await repository.saveMatchBundle(bundle);
+  return { bundle, conflicts };
+}
+
+export type TieBreakPatch = Pick<TieBreak, 'playerPoints' | 'opponentPoints' | 'netErrors' | 'wideErrors' | 'longErrors' | 'doubleFaults'>;
+
+/** Corrects a recorded tie-break in place (points must still decide it). Never changes `status`. */
+export async function updateTieBreak(tieBreakId: string, patch: TieBreakPatch, { repository, clock }: MatchServiceDeps, confirmed = false): Promise<CorrectionResult> {
+  let before: MatchBundle | undefined;
+  for (const match of await repository.listMatches()) {
+    const candidate = await repository.getMatchBundle(match.id);
+    if (candidate?.tieBreaks.some(item => item.id === tieBreakId)) { before = structuredClone(candidate); break; }
+  }
+  if (!before) throw new Error('Tie-break not found');
+  const bundle = structuredClone(before);
+  const tieBreak = bundle.tieBreaks.find(item => item.id === tieBreakId)!;
+  for (const field of ['playerPoints', 'opponentPoints', 'netErrors', 'wideErrors', 'longErrors', 'doubleFaults'] as const) {
+    const value = patch[field];
+    if ((value !== null || field === 'playerPoints' || field === 'opponentPoints') && (!Number.isInteger(value) || (value as number) < 0)) throw new Error(`${field} must be a non-negative integer${field.endsWith('Points') ? '' : ' or null'}`);
+  }
+  Object.assign(tieBreak, { playerPoints: patch.playerPoints, opponentPoints: patch.opponentPoints, netErrors: patch.netErrors, wideErrors: patch.wideErrors, longErrors: patch.longErrors, doubleFaults: patch.doubleFaults, updatedAt: clock.now() });
+  if (!evaluateSet(bundle.games.filter(game => game.setId === tieBreak.setId), tieBreak).completed) throw new Error('Invalid tie-break points');
+  const conflicts = correctionConflicts(before, bundle, null);
+  if (conflicts.length && !confirmed) return { bundle: before, conflicts };
+  bundle.match.updatedAt = tieBreak.updatedAt;
   await repository.saveMatchBundle(bundle);
   return { bundle, conflicts };
 }

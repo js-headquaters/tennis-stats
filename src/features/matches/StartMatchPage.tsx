@@ -4,7 +4,7 @@ import { dependencies } from '../../app/dependencies';
 import { abandonActiveMatch, startMatch, type MatchServiceDeps } from '../../application/matchService';
 import type { MatchBundle, MatchFormat, Opponent, Server } from '../../domain/model';
 
-function localDate(iso: string) {
+export function localDate(iso: string) {
   const date = new Date(iso);
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }

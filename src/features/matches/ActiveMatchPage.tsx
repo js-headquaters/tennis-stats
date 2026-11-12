@@ -4,6 +4,7 @@ import { dependencies } from '../../app/dependencies';
 import { addGames, completeTieBreak, deleteGame, endSetEarly, finishMatch, nextGameServer, updateComments, updateGame, type GameConflict, type GameInput, type MatchServiceDeps, type TieBreakInput } from '../../application/matchService';
 import type { Game, MatchBundle, MatchFormat } from '../../domain/model';
 import { evaluateSet } from '../../domain/scoring';
+import CorrectionConfirmation from './CorrectionConfirmation';
 import GameCard from './GameCard';
 import GameForm from './GameForm';
 import TieBreakForm from './TieBreakForm';
@@ -62,7 +63,7 @@ function ActiveMatchContent({ deps, matchId }: { deps?: MatchServiceDeps; matchI
     {isActive && active && tieKind && <TieBreakForm key={active.id} setId={active.id} kind={tieKind} busy={busy || !!correction} onSubmit={tie} />}
     {manual && active && !tieKind && <GameForm key={active.id} server={next} busy={busy || !!correction} onSubmit={add} onCancel={() => setManual(false)} />}
     {editing && <GameForm key={editing.id} game={editing} server={editing.server} busy={busy || !!correction} onSubmit={input => correct(confirmed => updateGame(editing.id, input, services, confirmed))} onCancel={() => setEditing(undefined)} />}
-    {correction && <section role="region" aria-label="Affected records" className="confirmation"><h2>Confirm affected records</h2><p>This correction affects existing records. Stored servers will not be rewritten.</p><ul>{correction.conflicts.map((c,i) => <li key={i}>{c.message}{c.gameId && ` (game ${c.gameId})`}</li>)}</ul><button disabled={busy} onClick={() => void run(async () => { const result = await correction.run(true); setBundle(result.bundle); setCorrection(undefined); setEditing(undefined); })}>Confirm affected records</button> <button disabled={busy} onClick={() => setCorrection(undefined)}>Cancel correction</button></section>}
+    {correction && <CorrectionConfirmation conflicts={correction.conflicts} busy={busy} onConfirm={() => void run(async () => { const result = await correction.run(true); setBundle(result.bundle); setCorrection(undefined); setEditing(undefined); })} onCancel={() => setCorrection(undefined)} />}
     <h2>Recent games</h2>{[...ordered].reverse().map(game => <GameCard key={game.id} game={game} disabled={busy || !!correction} onEdit={() => { setManual(false); setEditing(game); }} onDelete={() => void correct(confirmed => deleteGame(game.id, services, confirmed))} />)}
     {isActive && <section><h2>Match actions</h2>{active && <button disabled={busy || !!correction} onClick={() => setConfirmAction('end')}>End set early</button>} <button disabled={busy || !!correction} onClick={() => setConfirmAction('finish')}>Finish match</button>{confirmAction && <section className="confirmation" aria-label="Confirm match action"><p>{confirmAction === 'end' ? 'End this set early?' : 'Finish this match?'}</p><button disabled={busy || !!correction} onClick={() => void run(async () => { setBundle(confirmAction === 'end' && active ? await endSetEarly(active.id, services) : await finishMatch(bundle.match.id, services)); setConfirmAction(undefined); setManual(false); })}>Confirm {confirmAction === 'end' ? 'end set' : 'finish match'}</button> <button disabled={busy} onClick={() => setConfirmAction(undefined)}>Cancel</button></section>}</section>}
   </section>;

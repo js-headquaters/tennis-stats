@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { openDatabase } from '../infrastructure/db/database';
-import { abandonActiveMatch, addGames, completeTieBreak, deleteGame, endSetEarly, finishMatch, prepareGames, startMatch, updateComments, updateGame } from './matchService';
+import { abandonActiveMatch, addGames, completeTieBreak, deleteGame, endSetEarly, finishMatch, prepareGames, startMatch, updateComments, updateGame, updateMatchDetails, updateTieBreak } from './matchService';
 
 const clock = { now: () => '2026-01-01T12:00:00.000Z' };
 let counter = 0;
@@ -443,5 +443,62 @@ describe('post-completion chronology conflicts', () => {
     const result = await run(true); expect(save).toHaveBeenCalledTimes(1);
     expect(result.bundle.sets).toEqual(before.sets); expect(result.bundle.tieBreaks).toEqual(before.tieBreaks);
     expect(result.bundle.games.filter(g => g.id !== edited.id)).toEqual(before.games.filter(g => g.id !== edited.id));
+  });
+});
+
+describe('post-match metadata and tie-break corrections', () => {
+  const metrics = { netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns:null };
+  async function completedOneSet(deps: Awaited<ReturnType<typeof setup>>) {
+    const start = await startMatch({ ...input, format:'oneSet' }, deps);
+    const results = Array.from({ length:12 }, (_, i) => (i % 2 ? 'lost' : 'won') as 'won' | 'lost');
+    await addGames(start.match.id, results.map(result => ({ ...metrics, result })), deps);
+    return completeTieBreak({ setId:start.sets[0].id, kind:'standard', playerPoints:7, opponentPoints:5, netErrors:1, wideErrors:null, longErrors:null, doubleFaults:null }, deps);
+  }
+  it('updates opponent, date and format of a completed match without reactivating it', async () => {
+    const deps = await setup(); const done = await completedOneSet(deps); expect(done.match.status).toBe('completed');
+    const result = await updateMatchDetails(done.match.id, { opponentName:' Blake ', playedAt:'2026-02-03T10:00:00.000Z', format:'bestOfThree' }, deps);
+    expect(result.conflicts.map(c => c.type)).toContain('matchOutcomeInvalidated');
+    expect((await deps.repository.getMatchBundle(done.match.id))!.match.format).toBe('oneSet');
+    const confirmed = await updateMatchDetails(done.match.id, { opponentName:' Blake ', playedAt:'2026-02-03T10:00:00.000Z', format:'bestOfThree' }, deps, true);
+    const stored = (await deps.repository.getMatchBundle(done.match.id))!;
+    expect(stored.opponent.name).toBe('Blake'); expect(stored.match.opponentId).toBe(stored.opponent.id); expect(stored.match.playedAt).toBe('2026-02-03T10:00:00.000Z');
+    expect(stored.match.format).toBe('bestOfThree'); expect(stored.match.status).toBe('completed'); expect(confirmed.bundle.match.status).toBe('completed');
+    expect(await deps.repository.getActiveMatch()).toBeUndefined();
+    await expect(startMatch(input, deps)).resolves.toBeDefined();
+  });
+  it('reuses an existing opponent by name and applies non-disruptive edits immediately', async () => {
+    const deps = await setup(); const first = await startMatch({ ...input, opponentName:'Casey' }, deps); await finishMatch(first.match.id, deps);
+    const done = await completedOneSet(deps);
+    const result = await updateMatchDetails(done.match.id, { opponentName:'casey', playedAt:'2026-03-01T09:00:00.000Z' }, deps);
+    expect(result.conflicts).toEqual([]); expect(result.bundle.opponent.id).toBe(first.opponent.id);
+    expect((await deps.repository.getMatchBundle(done.match.id))!.match.opponentId).toBe(first.opponent.id);
+  });
+  it('rejects invalid metadata', async () => {
+    const deps = await setup(); const done = await completedOneSet(deps);
+    await expect(updateMatchDetails(done.match.id, { playedAt:'nope' }, deps)).rejects.toThrow(/valid date/);
+    await expect(updateMatchDetails(done.match.id, { opponentName:'  ' }, deps)).rejects.toThrow(/opponent name/);
+    await expect(updateMatchDetails(done.match.id, { format:'bogus' as never }, deps)).rejects.toThrow(/format/);
+    await expect(updateMatchDetails('missing', {}, deps)).rejects.toThrow(/not found/);
+  });
+  it('flags a format change that orphans a deciding super tie-break set', async () => {
+    const deps = await setup(); const start = await startMatch(input, deps);
+    const split = [...Array.from({ length:6 }, () => 'won' as const), ...Array.from({ length:6 }, () => 'lost' as const)];
+    const mid = await addGames(start.match.id, split.map(result => ({ ...metrics, result })), deps);
+    expect(mid.sets.find(s => s.kind === 'decidingSuperTiebreak')).toBeDefined();
+    const result = await updateMatchDetails(start.match.id, { format:'openPractice' }, deps);
+    expect(result.conflicts.map(c => c.type)).toContain('structureInvalidated');
+  });
+  it('corrects tie-break points with confirmation when the set outcome flips, keeping status', async () => {
+    const deps = await setup(); const done = await completedOneSet(deps); const tie = done.tieBreaks[0];
+    const quiet = await updateTieBreak(tie.id, { playerPoints:8, opponentPoints:6, netErrors:2, wideErrors:0, longErrors:null, doubleFaults:null }, deps);
+    expect(quiet.conflicts).toEqual([]); expect((await deps.repository.getMatchBundle(done.match.id))!.tieBreaks[0]).toMatchObject({ playerPoints:8, netErrors:2, wideErrors:0 });
+    const save = vi.spyOn(deps.repository, 'saveMatchBundle');
+    const preview = await updateTieBreak(tie.id, { playerPoints:5, opponentPoints:7, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null }, deps);
+    expect(preview.conflicts.map(c => c.type)).toEqual(expect.arrayContaining(['setOutcomeInvalidated', 'matchOutcomeInvalidated'])); expect(save).not.toHaveBeenCalled();
+    const applied = await updateTieBreak(tie.id, { playerPoints:5, opponentPoints:7, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null }, deps, true);
+    expect(applied.bundle.match.status).toBe('completed'); expect((await deps.repository.getMatchBundle(done.match.id))!.match.status).toBe('completed');
+    await expect(updateTieBreak(tie.id, { playerPoints:7, opponentPoints:6, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null }, deps)).rejects.toThrow(/tie-break points/);
+    await expect(updateTieBreak(tie.id, { playerPoints:7, opponentPoints:5, netErrors:-1, wideErrors:null, longErrors:null, doubleFaults:null }, deps)).rejects.toThrow(/non-negative/);
+    await expect(updateTieBreak('missing', { playerPoints:7, opponentPoints:5, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null }, deps)).rejects.toThrow(/not found/);
   });
 });

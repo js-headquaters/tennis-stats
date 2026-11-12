@@ -61,3 +61,13 @@
 .match-filters input, .match-filters select { display: block; width: 100%; max-width: 30rem; }
 .match-history ul { list-style: none; padding: 0; margin: 0; }
 .match-history li { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .75rem; padding: .5rem 0; border-bottom: 1px solid var(--border); }
+.match-details .touch-link { display: inline-flex; align-items: center; padding: .5rem; color: var(--text); background: white; border: 1px solid var(--border); border-radius: .5rem; font-weight: 700; }
+.match-details .match-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: .5rem; margin: 1rem 0; }
+.match-details .match-facts dt { font-size: .875rem; }
+.match-details .match-facts dd { margin: 0; font-weight: 700; }
+.match-details .match-set { border-top: 1px solid var(--border); margin-top: 1.5rem; }
+.match-details .set-summary { font-size: 1.125rem; font-weight: 700; }
+.match-averages { overflow-x: auto; }
+.match-averages table { border-collapse: collapse; width: 100%; }
+.match-averages th, .match-averages td { text-align: left; padding: .5rem; border-bottom: 1px solid var(--border); font-size: 1.125rem; }
+.match-averages th small { display: block; font-size: .875rem; font-weight: 400; }
