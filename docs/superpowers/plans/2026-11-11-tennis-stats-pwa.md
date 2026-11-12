@@ -488,23 +488,23 @@ Run `npm run build`, inspect the generated manifest/service worker scope, run co
 **Interfaces:**
 - Produces: deterministic IndexedDB seeds, fake microphone/audio input, mocked OpenAI/Anthropic routes, and a critical smoke project runnable against the production build in Chromium and WebKit.
 
-- [ ] **Step 1: Build deterministic E2E fixtures**
+- [x] **Step 1: Build deterministic E2E fixtures**
 
 Provide helpers `seedDatabase(page, snapshot)`, `mockAi(page, scenario)`, `installFakeMicrophone(page)`, and `readDatabase(page)`; assert fixtures contain no real key-shaped strings.
 
-- [ ] **Step 2: Add failing critical journeys**
+- [x] **Step 2: Add failing critical journeys**
 
 Cover all 14 E2E journeys listed in the spec, with separate assertions for duplicate voice confirmation after reload, unknown-versus-zero backup/dashboard behavior, conflict review after early-game correction, provider secret redaction, and iOS/WebKit microphone fallback to manual entry.
 
-- [ ] **Step 3: Run each spec while writing it**
+- [x] **Step 3: Run each spec while writing it**
 
 Run `npm run test:e2e -- tests/e2e/<spec>.spec.ts --project=chromium`; each new test must fail for the intended assertion before any required production fix, then pass after the minimal fix.
 
-- [ ] **Step 4: Run the cross-browser smoke subset**
+- [x] **Step 4: Run the cross-browser smoke subset**
 
 Run `npm run test:e2e -- --grep @smoke --project=chromium --project=webkit`; expect zero failures.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run `git add tests playwright.config.ts src && git commit -m "test: cover critical tennis journeys"`.
 
