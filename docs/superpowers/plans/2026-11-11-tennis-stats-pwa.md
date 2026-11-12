@@ -156,23 +156,23 @@ Run `git add src/domain && git commit -m "feat: define tennis domain model"`.
 - Consumes: `Game`, `TennisSet`, `TieBreak`, `MatchFormat`, `Server` from Task 2.
 - Produces: `inferServer(first: Server, zeroBasedGameIndex: number): Server`; `evaluateSet(games: Game[], tieBreak: TieBreak | null): SetEvaluation`; `evaluateMatch(format: MatchFormat, sets: SetEvaluation[]): MatchEvaluation`; `findCorrectionConflicts(before: Game[], after: Game[]): CorrectionConflict[]`.
 
-- [ ] **Step 1: Write failing scoring tests**
+- [x] **Step 1: Write failing scoring tests**
 
 Assert alternating service; valid standard endings 6–0, 6–4, 7–5, and 7–6 with a tie-break; no automatic ending at 6–5 or 6–6; split first two sets requiring a super tie-break; one-set and best-of-three completion; unfinished sets never counting as wins; and open/practice requiring manual completion.
 
-- [ ] **Step 2: Add failing correction-conflict tests**
+- [x] **Step 2: Add failing correction-conflict tests**
 
 Assert that deleting or inserting an early game reports later explicit servers whose inferred server changed and reports a completed set/match whose derived outcome became invalid; do not silently mutate those records.
 
-- [ ] **Step 3: Run tests and verify failure**
+- [x] **Step 3: Run tests and verify failure**
 
 Run `npm test -- src/domain/scoring.test.ts`; expect missing functions.
 
-- [ ] **Step 4: Implement pure scoring functions**
+- [x] **Step 4: Implement pure scoring functions**
 
 Keep all functions deterministic and side-effect free. A standard tie-break decides a set only from 6–6; a deciding super tie-break is a `TennisSet` with `kind: "decidingSuperTiebreak"` and no normal games.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run `npm test -- src/domain/scoring.test.ts && npm run typecheck`, then `git add src/domain && git commit -m "feat: add tennis scoring rules"`.
 
