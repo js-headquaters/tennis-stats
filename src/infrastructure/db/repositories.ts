@@ -1,5 +1,5 @@
 import type { TennisRepository, MatchFilter } from '../../application/ports';
-import type { DatabaseSnapshot, MatchBundle, VoiceDraft } from '../../domain/model';
+import type { DatabaseSnapshot, Match, MatchBundle, VoiceDraft } from '../../domain/model';
 import { DATA_VERSION } from './migrations';
 import type { TennisDatabase } from './schema';
 
@@ -9,12 +9,21 @@ export class IndexedDbTennisRepository implements TennisRepository {
   close() { this.db.close(); }
   async listOpponents() { return this.db.opponents.toArray(); }
   async listMatches(filter: MatchFilter = {}) { return (await this.db.matches.toArray()).filter(m => (!filter.status || m.status === filter.status) && (!filter.opponentId || m.opponentId === filter.opponentId)); }
-  async getActiveMatch() { const match = await this.db.matches.where('status').equals('active').first(); return match ? this.getMatchBundle(match.id) : undefined; }
+  async getActiveMatch() {
+    return this.db.transaction('r', this.db.matches, this.db.opponents, this.db.sets, this.db.games, this.db.tieBreaks, async () => {
+      const match = await this.db.matches.where('status').equals('active').first();
+      return match ? this.assembleBundle(match) : undefined;
+    });
+  }
   async getMatchBundle(id: string): Promise<MatchBundle | undefined> {
     return this.db.transaction('r', this.db.matches, this.db.opponents, this.db.sets, this.db.games, this.db.tieBreaks, async () => {
       const match = await this.db.matches.get(id); if (!match) return undefined;
+      return this.assembleBundle(match);
+    });
+  }
+  private async assembleBundle(match: Match): Promise<MatchBundle> {
       const opponent = await this.db.opponents.get(match.opponentId); if (!opponent) throw new Error('Match opponent missing');
-      const sets = (await this.db.sets.where('matchId').equals(id).toArray()).sort((a, b) => a.ordinal - b.ordinal);
+      const sets = (await this.db.sets.where('matchId').equals(match.id).toArray()).sort((a, b) => a.ordinal - b.ordinal);
       const ids = sets.map(s => s.id);
       const games = ids.length ? await this.db.games.where('setId').anyOf(ids).toArray() : [];
       const tieBreaks = ids.length ? await this.db.tieBreaks.where('setId').anyOf(ids).toArray() : [];
@@ -22,7 +31,6 @@ export class IndexedDbTennisRepository implements TennisRepository {
       games.sort((a, b) => (order.get(a.setId)! - order.get(b.setId)!) || a.ordinal - b.ordinal);
       tieBreaks.sort((a, b) => order.get(a.setId)! - order.get(b.setId)!);
       return { match, opponent, sets, games, tieBreaks };
-    });
   }
   private async removeChildren(id: string) {
     const sets = await this.db.sets.where('matchId').equals(id).toArray();
@@ -41,13 +49,28 @@ export class IndexedDbTennisRepository implements TennisRepository {
     });
   }
   async deleteMatch(id: string) { this.writable(); await this.db.transaction('rw', this.db.matches, this.db.sets, this.db.games, this.db.tieBreaks, this.db.drafts, async () => { await this.removeChildren(id); await this.db.drafts.where('matchId').equals(id).delete(); await this.db.matches.delete(id); }); }
-  async saveDraft(draft: VoiceDraft) { this.writable(); await this.db.drafts.put(draft); }
+  async saveDraft(draft: VoiceDraft) {
+    this.writable();
+    await this.db.transaction('rw', this.db.matches, this.db.drafts, async () => {
+      if (!await this.db.matches.get(draft.matchId)) throw new Error('Draft match missing');
+      await this.db.drafts.put(draft);
+    });
+  }
   async getDraft(id: string) { return this.db.drafts.get(id); }
   async deleteDraft(id: string) { this.writable(); await this.db.drafts.delete(id); }
   async replaceAll(snapshot: DatabaseSnapshot) {
     this.writable();
     await this.db.transaction('rw', this.db.tables, async () => {
       if (snapshot.dataVersion !== DATA_VERSION || snapshot.matches.filter(m => m.status === 'active').length > 1) throw new Error('Invalid snapshot');
+      const opponents = new Set(snapshot.opponents.map(o => o.id));
+      const matches = new Set(snapshot.matches.map(m => m.id));
+      const sets = new Map(snapshot.sets.map(s => [s.id, s]));
+      const tieBreaks = new Map(snapshot.tieBreaks.map(t => [t.id, t]));
+      if (snapshot.matches.some(m => !opponents.has(m.opponentId)) ||
+          snapshot.sets.some(s => !matches.has(s.matchId) || (s.tieBreakId !== null && tieBreaks.get(s.tieBreakId)?.setId !== s.id)) ||
+          snapshot.games.some(g => !sets.has(g.setId)) ||
+          snapshot.tieBreaks.some(t => sets.get(t.setId)?.tieBreakId !== t.id) ||
+          snapshot.voiceDrafts.some(d => !matches.has(d.matchId))) throw new Error('Invalid snapshot associations');
       for (const table of this.db.tables) await table.clear();
       await this.db.opponents.bulkAdd(snapshot.opponents); await this.db.matches.bulkAdd(snapshot.matches); await this.db.sets.bulkAdd(snapshot.sets); await this.db.games.bulkAdd(snapshot.games); await this.db.tieBreaks.bulkAdd(snapshot.tieBreaks); await this.db.drafts.bulkAdd(snapshot.voiceDrafts); await this.db.metadata.put({ key: 'dataVersion', value: DATA_VERSION });
     });

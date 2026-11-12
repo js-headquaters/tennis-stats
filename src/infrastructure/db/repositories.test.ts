@@ -41,6 +41,24 @@ describe('IndexedDB repository', () => {
     expect(await repo.listMatches()).toHaveLength(1);
     expect(await repo.listOpponents()).toHaveLength(1);
   });
+  it('does not delegate active reads across a deletion gap', async () => {
+    const repo = await setup(); await repo.saveMatchBundle(bundle('m'));
+    const originalGetBundle = repo.getMatchBundle.bind(repo);
+    // Force a deletion into the former gap between active lookup and bundle lookup.
+    repo.getMatchBundle = async id => { await repo.deleteMatch(id); return originalGetBundle(id); };
+    const active = await repo.getActiveMatch();
+    expect(active?.match).toMatchObject({ id: 'm', status: 'active' });
+    expect(active?.sets).toHaveLength(2);
+  });
+  it('serializes a competing delete after an active bundle read', async () => {
+    const repo = await setup(); await repo.saveMatchBundle(bundle('m'));
+    const reading = repo.getActiveMatch();
+    const deletion = repo.deleteMatch('m');
+    const [active] = await Promise.all([reading, deletion]);
+    expect(active?.match).toMatchObject({ id: 'm', status: 'active' });
+    expect(active?.sets).toHaveLength(2);
+    expect(await repo.getActiveMatch()).toBeUndefined();
+  });
   it('replaces children and deletes a match without deleting its opponent', async () => {
     const repo = await setup(); const original = bundle('m');
     await repo.saveMatchBundle(original);
@@ -52,11 +70,24 @@ describe('IndexedDB repository', () => {
   });
   it('persists pending recording blobs', async () => {
     const repo = await setup(); const recording = new Blob(['audio'], { type: 'audio/webm' });
+    await repo.saveMatchBundle(bundle('m'));
     await repo.saveDraft({ ...stamp, id: 'd', matchId: 'm', transcript: '', dataVersion: 1, recording });
     const draft = await repo.getDraft('d');
     expect(await draft?.recording?.text()).toBe('audio');
     expect(draft?.recording?.type).toBe('audio/webm');
     await repo.deleteDraft('d'); expect(await repo.getDraft('d')).toBeUndefined();
+  });
+  it('rejects drafts without a parent, including saves queued after deletion', async () => {
+    const repo = await setup();
+    const draft = { ...stamp, id: 'd', matchId: 'm', transcript: '', dataVersion: 1 };
+    await expect(repo.saveDraft(draft)).rejects.toThrow();
+    await repo.saveMatchBundle(bundle('m'));
+    await repo.saveDraft(draft);
+    const deletion = repo.deleteMatch('m');
+    const saving = repo.saveDraft(draft);
+    await deletion;
+    await expect(saving).rejects.toThrow();
+    expect(await repo.getDraft('d')).toBeUndefined();
   });
   it('rejects invalid replacement without disturbing existing data', async () => {
     const repo = await setup(); await repo.saveMatchBundle(bundle('original'));
@@ -64,6 +95,30 @@ describe('IndexedDB repository', () => {
     const snapshot: DatabaseSnapshot = { dataVersion: 1, opponents: [a.opponent], matches: [a.match, b.match], sets: [], games: [], tieBreaks: [], voiceDrafts: [] };
     await expect(repo.replaceAll(snapshot)).rejects.toThrow();
     expect((await repo.getActiveMatch())?.match.id).toBe('original');
+  });
+  it.each(['opponent', 'set parent', 'game parent', 'tie-break parent', 'tie-break link', 'missing tie-break', 'draft parent'])('rejects a replacement with broken %s integrity', async broken => {
+    const repo = await setup(); await repo.saveMatchBundle(bundle('original'));
+    const item = bundle('a', 'completed');
+    const snapshot: DatabaseSnapshot = { dataVersion: 1, opponents: [item.opponent], matches: [item.match], sets: item.sets, games: item.games, tieBreaks: item.tieBreaks, voiceDrafts: [{ ...stamp, id: 'd', matchId: 'a', transcript: '', dataVersion: 1 }] };
+    switch (broken) {
+      case 'opponent': snapshot.matches[0].opponentId = 'missing'; break;
+      case 'set parent': snapshot.sets[0].matchId = 'missing'; break;
+      case 'game parent': snapshot.games[0].setId = 'missing'; break;
+      case 'tie-break parent': snapshot.tieBreaks[0].setId = 'missing'; break;
+      case 'tie-break link': snapshot.sets[1].tieBreakId = null; break;
+      case 'missing tie-break': snapshot.tieBreaks = []; break;
+      case 'draft parent': snapshot.voiceDrafts[0].matchId = 'missing'; break;
+    }
+    await expect(repo.replaceAll(snapshot)).rejects.toThrow();
+    expect((await repo.getActiveMatch())?.match.id).toBe('original');
+    expect(await repo.listOpponents()).toEqual([bundle('original').opponent]);
+  });
+  it('accepts a structurally connected replacement including a draft', async () => {
+    const repo = await setup(); const item = bundle('a');
+    const draft = { ...stamp, id: 'd', matchId: 'a', transcript: '', dataVersion: 1 };
+    await repo.replaceAll({ dataVersion: 1, opponents: [item.opponent], matches: [item.match], sets: item.sets, games: item.games, tieBreaks: item.tieBreaks, voiceDrafts: [draft] });
+    expect((await repo.getActiveMatch())?.match.id).toBe('a');
+    expect(await repo.getDraft('d')).toEqual(draft);
   });
   it('rolls back a bundle when a child key conflicts after writes have started', async () => {
     const repo = await setup();

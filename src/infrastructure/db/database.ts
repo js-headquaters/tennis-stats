@@ -11,6 +11,6 @@ export async function openDatabase(name = 'tennis-stats', migrate = runDataMigra
       const version = (await db.metadata.get('dataVersion'))?.value ?? 0;
       await migrate(db, version, DATA_VERSION);
     });
-  } catch (error) { recoveryError = error; }
+  } catch (error) { recoveryError = error instanceof Error ? error : new Error('Data migration failed', { cause: error }); }
   return new IndexedDbTennisRepository(db, recoveryError);
 }

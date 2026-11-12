@@ -24,3 +24,22 @@ it('preserves original data and enters read-only recovery on migration failure',
   await expect(repo.deleteMatch('x')).rejects.toThrow(/read.only/i);
   repo.close();
 });
+it('treats a null migration throw as recovery and rejects every write', async () => {
+  const db = new TennisDatabase(name); await db.open();
+  const opponent = { id: 'o', name: 'Alex', normalizedName: 'alex', createdAt: 'old', updatedAt: 'old' };
+  await db.opponents.put(opponent); db.close();
+  const repo = await openDatabase(name, async db => { await db.opponents.clear(); throw null; });
+  try {
+    expect(repo.recoveryError).toBeInstanceOf(Error);
+    expect(await repo.listOpponents()).toEqual([opponent]);
+    const match = { id: 'm', opponentId: 'o', playedAt: 'old', format: 'oneSet' as const, firstServer: 'player' as const, status: 'active' as const, comments: null, createdAt: 'old', updatedAt: 'old' };
+    const draft = { id: 'd', matchId: 'm', transcript: '', dataVersion: 1, createdAt: 'old', updatedAt: 'old' };
+    const writes = [
+      () => repo.saveMatchBundle({ match, opponent, sets: [], games: [], tieBreaks: [] }),
+      () => repo.deleteMatch('m'), () => repo.saveDraft(draft), () => repo.deleteDraft('d'),
+      () => repo.replaceAll({ dataVersion: 1, opponents: [], matches: [], sets: [], games: [], tieBreaks: [], voiceDrafts: [] }),
+    ];
+    for (const write of writes) await expect(write()).rejects.toThrow(/read.only/i);
+    expect(await repo.listOpponents()).toEqual([opponent]);
+  } finally { repo.close(); }
+});
