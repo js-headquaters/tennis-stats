@@ -290,23 +290,23 @@ Run targeted tests, `npm run typecheck`, and `npm run lint`; then commit `feat: 
 **Interfaces:**
 - Produces: `addGames(matchId, inputs, deps)`, `updateGame(gameId, patch, deps)`, `deleteGame(gameId, deps)`, `completeTieBreak(input, deps)`, `endSetEarly(setId, deps)`, `finishMatch(id, deps)`; every correction returns `{ bundle, conflicts }`.
 
-- [ ] **Step 1: Write failing service tests**
+- [x] **Step 1: Write failing service tests**
 
 Assert batch insertion preserves explicit `null` and `0`, infers/stores alternating servers, validates failed returns/double faults by server, auto-completes standard sets and configured matches, creates standard/super tie-break prompts, marks early sets unfinished, and returns correction conflicts without rewriting later servers.
 
-- [ ] **Step 2: Write failing UI tests**
+- [x] **Step 2: Write failing UI tests**
 
 Assert readable separate metric cells, won/lost text labels, unknown `—`, manual form behavior, set/match actions, comments entry, and a conflict confirmation screen before structurally disruptive edits.
 
-- [ ] **Step 3: Run tests and verify failure**
+- [x] **Step 3: Run tests and verify failure**
 
 Run `npm test -- src/application/matchService.test.ts src/features/matches`; expect failures.
 
-- [ ] **Step 4: Implement active-match and correction workflows**
+- [x] **Step 4: Implement active-match and correction workflows**
 
 Keep the primary voice action and secondary manual action visible. Persist each confirmed service operation transactionally and derive all displayed scores through Task 3 functions.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run targeted tests plus `npm run typecheck && npm run lint`; commit `feat: manage live matches and corrections`.
 
