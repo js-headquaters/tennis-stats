@@ -7,6 +7,7 @@ import { evaluateSet } from '../../domain/scoring';
 import type { AudioRecorder } from '../../infrastructure/audio/mediaRecorder';
 import { useWorkHold } from '../../app/workGuard';
 import ReadOnlyNotice from '../../components/ReadOnlyNotice';
+import { draftPath, matchLivePath } from '../../app/routes';
 
 type Service = { persistDraftFromAudio(input: { matchId: string; setId: string; audio: Blob; mimeType: string }): Promise<Pick<VoiceDraft, 'id' | 'state'>> };
 type Scheduler = { schedule(action: () => void, delay: number): () => void };
@@ -88,7 +89,7 @@ function RecordContent({ matchId, repository, createRecorder = dependencies.crea
     } catch (e) { if (alive.current && token === generation.current) showError(e); }
     finally { if (token === generation.current) lock.current = false; }
   }
-  function opened(draft: Pick<VoiceDraft, 'id'>) { setUnsaved(null); navigate(`/voice/${encodeURIComponent(draft.id)}`); }
+  function opened(draft: Pick<VoiceDraft, 'id'>) { setUnsaved(null); navigate(draftPath(draft.id)); }
   async function persist(audio: Audio, token: number) {
     if (!loaded) return;
     setError(''); setState('saving'); timedOut.current = false;
@@ -124,7 +125,7 @@ function RecordContent({ matchId, repository, createRecorder = dependencies.crea
   }
   if (loading) return <section><h1>Record voice entry</h1><p role="status">Loading match…</p></section>;
   return <section className="record-page"><h1>Record voice entry</h1>
-    {!!drafts.length && <><h2>Saved voice drafts</h2><ul>{drafts.map(draft => <li key={draft.id}><Link to={`/voice/${encodeURIComponent(draft.id)}`}>Resume draft from {draft.createdAt} — {draftLabels[draft.state] ?? 'needs attention'}</Link></li>)}</ul></>}
+    {!!drafts.length && <><h2>Saved voice drafts</h2><ul>{drafts.map(draft => <li key={draft.id}><Link to={draftPath(draft.id)}>Resume draft from {draft.createdAt} — {draftLabels[draft.state] ?? 'needs attention'}</Link></li>)}</ul></>}
     {listError && <p>Saved drafts could not be listed. Recording is still available.</p>}
     {loadError ? <><p role="alert">{loadError}</p><button onClick={() => { setLoading(true); setLoadError(''); setLoaded(undefined); setAttempt(n => n + 1); }}>Retry</button></> : <>
       <p>Record up to two minutes. Recording stops automatically at the limit.</p>
@@ -136,6 +137,6 @@ function RecordContent({ matchId, repository, createRecorder = dependencies.crea
       {state === 'recording' && <button onClick={() => void stop()}>Stop recording</button>}
       {(state === 'requesting-permission' || state === 'recording' || state === 'stopping') && <button onClick={() => void cancel()}>Cancel recording</button>}
     </>}
-    <p><Link to={`/matches/${encodeURIComponent(matchId)}/live`}>Manual entry</Link> <Link to="/settings">Settings</Link></p>
+    <p><Link to={matchLivePath(matchId)}>Manual entry</Link> <Link to="/settings">Settings</Link></p>
   </section>;
 }

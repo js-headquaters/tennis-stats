@@ -13,6 +13,7 @@ import MatchMetadataForm from './MatchMetadataForm';
 import MatchSetDetails from './MatchSetDetails';
 import TieBreakForm from './TieBreakForm';
 import ReadOnlyNotice from '../../components/ReadOnlyNotice';
+import { matchLivePath } from '../../app/routes';
 
 type Correction = { conflicts: GameConflict[]; run: (confirmed: boolean) => Promise<CorrectionResult> };
 type Editing = { kind: 'game'; game: Game } | { kind: 'tieBreak'; tieBreak: TieBreak };
@@ -90,7 +91,7 @@ function MatchDetailsContent({ deps, matchId }: { deps?: MatchServiceDeps; match
       <div><dt>Status</dt><dd>{COMPLETION_LABEL[bundle.match.status]}</dd></div>
       <div><dt>Result</dt><dd>{result(bundle)}</dd></div>
     </dl>
-    <p><Link className="touch-link" to="/matches">Back to matches</Link>{bundle.match.status === 'active' && <> <Link className="touch-link" to={`/matches/${encodeURIComponent(bundle.match.id)}/live`}>Continue live match</Link></>}</p>
+    <p><Link className="touch-link" to="/matches">Back to matches</Link>{bundle.match.status === 'active' && <> <Link className="touch-link" to={matchLivePath(bundle.match.id)}>Continue live match</Link></>}</p>
     {error && <p role="alert">{error}</p>}
     {notice && <p role="status">{notice}</p>}
     {readOnly && <ReadOnlyNotice disabled="correcting games, tie-breaks, match details and comments is" />}

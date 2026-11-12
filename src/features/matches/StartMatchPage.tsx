@@ -4,6 +4,7 @@ import { dependencies } from '../../app/dependencies';
 import { abandonActiveMatch, startMatch, type MatchServiceDeps } from '../../application/matchService';
 import type { MatchBundle, MatchFormat, Opponent, Server } from '../../domain/model';
 import ReadOnlyNotice from '../../components/ReadOnlyNotice';
+import { matchLivePath } from '../../app/routes';
 
 export function localDate(iso: string) {
   const date = new Date(iso);
@@ -44,7 +45,7 @@ export default function StartMatchPage({ deps }: { deps?: MatchServiceDeps }) {
     setBusy(true); setError('');
     try {
       const bundle = await startMatch({ opponentName: name, playedAt: new Date(date).toISOString(), format, firstServer: server }, services);
-      navigate(`/matches/${bundle.match.id}/live`);
+      navigate(matchLivePath(bundle.match.id));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not start match');
       try { setActive(await services.repository.getActiveMatch()); } catch { /* retain the original error */ }
@@ -60,7 +61,7 @@ export default function StartMatchPage({ deps }: { deps?: MatchServiceDeps }) {
   return <section className="match-setup"><h1>New match</h1>
     {error && <p role="alert">{error}</p>}
     {readOnly && <ReadOnlyNotice disabled="starting or abandoning a match is" />}
-    {loading ? <p>Loading matches…</p> : loadFailed ? <section aria-label="Loading failed"><p>Could not load match setup. Please try again.</p><button type="button" onClick={() => { setError(''); setLoadFailed(false); setLoading(true); setAttempt(value => value + 1); }}>Retry</button> <Link className="touch-link" to="/settings">Settings</Link></section> : active ? <section aria-label="Active match"><p>An active match exists. Complete or abandon it before starting another.</p><p>Against {active.opponent.name}</p><Link className="touch-link" to={`/matches/${active.match.id}/live`}>Resume match to complete it</Link> <button type="button" disabled={busy || readOnly} onClick={abandon}>Abandon active match</button></section> : <form onSubmit={submit}>
+    {loading ? <p>Loading matches…</p> : loadFailed ? <section aria-label="Loading failed"><p>Could not load match setup. Please try again.</p><button type="button" onClick={() => { setError(''); setLoadFailed(false); setLoading(true); setAttempt(value => value + 1); }}>Retry</button> <Link className="touch-link" to="/settings">Settings</Link></section> : active ? <section aria-label="Active match"><p>An active match exists. Complete or abandon it before starting another.</p><p>Against {active.opponent.name}</p><Link className="touch-link" to={matchLivePath(active.match.id)}>Resume match to complete it</Link> <button type="button" disabled={busy || readOnly} onClick={abandon}>Abandon active match</button></section> : <form onSubmit={submit}>
       <p><label htmlFor="opponent">Opponent</label> <input id="opponent" list="opponent-suggestions" value={name} onChange={e => setName(e.target.value)} required /><datalist id="opponent-suggestions">{opponents.filter(o => o.name.toLowerCase().includes(name.trim().toLowerCase())).map(o => <option key={o.id} value={o.name} />)}</datalist></p>
       <p><label htmlFor="playedAt">Date and time</label> <input id="playedAt" type="datetime-local" value={date} onChange={e => setDate(e.target.value)} required /></p>
       <p><label htmlFor="format">Format</label> <select id="format" value={format} onChange={e => setFormat(e.target.value as MatchFormat)}><option value="twoSetsSuperTiebreak">Two sets plus deciding super tie-break</option><option value="openPractice">Open/practice match with manual completion</option><option value="oneSet">One set</option><option value="bestOfThree">Best of three sets</option></select></p>

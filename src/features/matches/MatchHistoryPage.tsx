@@ -6,6 +6,7 @@ import type { Match, MatchBundle, MatchFormat, MatchStatus, Opponent } from '../
 import { evaluateStoredMatch, evaluateStoredSet } from '../../domain/scoring';
 import { formatDay } from '../dashboard/periods';
 import MatchFilters, { NO_FILTERS, type MatchFilterValue } from './MatchFilters';
+import { matchPath } from '../../app/routes';
 
 export const FORMAT_LABEL: Record<MatchFormat, string> = {
   twoSetsSuperTiebreak: 'Two sets plus deciding super tie-break',
@@ -95,7 +96,7 @@ export default function MatchHistoryPage({ repository }: { repository?: TennisRe
       {data.map(({ match, opponentName, bundle }) => {
         const summary = bundle && bundle !== 'failed' ? summarise(bundle) : undefined;
         return <li key={match.id}>
-          <Link className="touch-link" to={`/matches/${match.id}`}>{opponentName}</Link>
+          <Link className="touch-link" to={matchPath(match.id)}>{opponentName}</Link>
           <span>{dayLabel(match.playedAt)}</span>
           <span>{COMPLETION_LABEL[match.status]}</span>
           <span>{FORMAT_LABEL[match.format]}</span>

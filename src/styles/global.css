@@ -99,3 +99,9 @@
 .update-actions button { min-height: 44px; min-width: 44px; padding: .5rem .75rem; font: inherit; color: var(--text); background: white; border: 1px solid var(--border); border-radius: .5rem; }
 .update-actions button:first-child:not(:disabled) { background: var(--lime); font-weight: 700; }
 .update-actions button:disabled { opacity: .6; }
+.ai-settings button, .ai-settings input, .ai-settings select { min-height: 44px; min-width: 44px; padding: .5rem; font: inherit; }
+.ai-settings label { display: block; margin: .75rem 0; }
+.ai-settings label input, .ai-settings label select { display: block; width: 100%; max-width: 30rem; }
+.live-match-error button, .live-match-error a { min-height: 44px; min-width: 44px; padding: .5rem .75rem; font: inherit; display: inline-flex; align-items: center; justify-content: center; color: var(--text); }
+.route-fallback { padding: 1.25rem; }
+.route-fallback-links a { min-height: 44px; min-width: 44px; padding: .5rem .75rem; display: inline-flex; align-items: center; color: var(--text); background: white; border: 1px solid var(--border); border-radius: .5rem; font-weight: 700; }

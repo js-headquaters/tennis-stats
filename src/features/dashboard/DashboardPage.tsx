@@ -6,6 +6,7 @@ import type { MatchBundle, MatchStatus } from '../../domain/model';
 import { RECORDED_METRICS, calculateDashboard, calculateMetric, gamesPlayedInRange } from '../../domain/statistics';
 import MetricCard from './MetricCard';
 import { formatDay, periodAt, periodLabel, previousPeriod, shortPeriodLabel, type PeriodUnit } from './periods';
+import { matchLivePath, matchPath } from '../../app/routes';
 
 const HISTORY_LENGTH = 6;
 const RECENT_LIMIT = 5;
@@ -80,7 +81,7 @@ export default function DashboardPage({ repository, clock }: { repository?: Tenn
   const statisticsFailed = failed || (data !== undefined && data.bundles === undefined);
   return <section className="dashboard"><h1>Home</h1>
     {data?.activeFailed && <div><p role="alert">Unable to load the active match.</p><button type="button" onClick={retry}>Retry active match</button></div>}
-    {data?.active && <section aria-label="Active match" className="resume-card"><h2>Match in progress</h2><p>Against {data.active.opponent.name}</p><Link className="action-link" to={`/matches/${data.active.match.id}/live`}>Resume match</Link></section>}
+    {data?.active && <section aria-label="Active match" className="resume-card"><h2>Match in progress</h2><p>Against {data.active.opponent.name}</p><Link className="action-link" to={matchLivePath(data.active.match.id)}>Resume match</Link></section>}
     <section aria-labelledby="statistics-heading" className="dashboard-statistics"><h2 id="statistics-heading">Statistics</h2>
       {statisticsFailed ? <div><p role="alert">Unable to load statistics.</p><button type="button" onClick={retry}>Retry</button></div>
         : !view ? <p>Loading statistics…</p>
@@ -101,7 +102,7 @@ export default function DashboardPage({ repository, clock }: { repository?: Tenn
     </section>
     {view && <section aria-labelledby="recent-heading" className="recent-matches"><h2 id="recent-heading">Recent matches</h2>
       {view.recent.length === 0 ? <p>No matches recorded yet.</p> : <ul>{view.recent.map(({ match, opponent }) => <li key={match.id}>
-        <Link className="touch-link" to={`/matches/${match.id}`}>{opponent.name}</Link>
+        <Link className="touch-link" to={matchPath(match.id)}>{opponent.name}</Link>
         <span>{Number.isNaN(new Date(match.playedAt).getTime()) ? 'Unknown date' : formatDay(new Date(match.playedAt))}</span>
         <span>{STATUS_LABEL[match.status]}</span>
       </li>)}</ul>}

@@ -8,7 +8,7 @@ export function AiSettingsSection({ title, kind, initial, save, clear, testConne
   const [switched, setSwitched] = useState(false);
   const current = () => ({ ...settings, apiKey: key || settings.apiKey });
   const changed = () => setMessage('');
-  return <fieldset disabled={pending}><legend>{title}</legend>
+  return <fieldset className="ai-settings" disabled={pending}><legend>{title}</legend>
     <label>Provider <select value={settings.provider} onChange={event => { const provider = event.target.value as Settings['provider']; setSettings({ provider, model: provider === 'anthropic' ? 'claude-sonnet-4-5' : 'gpt-4o-mini', endpoint: '', apiKey: '' }); setKey(''); setSwitched(true); changed(); }}><option value="openai">OpenAI</option>{kind === 'parser' && <option value="anthropic">Anthropic</option>}</select></label>
     <label>Model <input value={settings.model} onChange={event => { setSettings({ ...settings, model: event.target.value }); changed(); }} /></label>
     <label>Endpoint (optional) <input value={settings.endpoint} onChange={event => { setSettings({ ...settings, endpoint: event.target.value }); changed(); }} /></label>

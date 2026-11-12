@@ -9,6 +9,7 @@ import GameCard from './GameCard';
 import GameForm from './GameForm';
 import TieBreakForm from './TieBreakForm';
 import ReadOnlyNotice from '../../components/ReadOnlyNotice';
+import { matchRecordPath } from '../../app/routes';
 
 const formats: Record<MatchFormat, string> = { oneSet:'One set', bestOfThree:'Best of three sets', openPractice:'Open/practice match', twoSetsSuperTiebreak:'Two sets plus deciding super tie-break' };
 type Correction = { conflicts: GameConflict[]; run: (confirmed: boolean) => ReturnType<typeof deleteGame> };
@@ -44,8 +45,8 @@ function ActiveMatchContent({ deps, matchId }: { deps?: MatchServiceDeps; matchI
   async function correct(operation: Correction['run']) {
     await run(async () => { const result = await operation(false); if (result.conflicts.length) setCorrection({ conflicts: result.conflicts, run: operation }); else { setBundle(result.bundle); setEditing(undefined); } });
   }
-  if (loading || (bundle && bundle.match.id !== matchId)) return <section><h1>Live match</h1><p role="status">Loading match…</p></section>;
-  if (loadError || !bundle || !services) return <section><h1>Live match</h1><p role="alert">{loadError ? `Could not load match: ${loadError}` : 'Match not found.'}</p><button onClick={() => { setLoading(true); setLoadError(''); setAttempt(a => a + 1); }}>Retry</button> <Link to="/matches">Matches</Link></section>;
+  if (loading || (bundle && bundle.match.id !== matchId)) return <section className="live-match-error"><h1>Live match</h1><p role="status">Loading match…</p></section>;
+  if (loadError || !bundle || !services) return <section className="live-match-error"><h1>Live match</h1><p role="alert">{loadError ? `Could not load match: ${loadError}` : 'Match not found.'}</p><button onClick={() => { setLoading(true); setLoadError(''); setAttempt(a => a + 1); }}>Retry</button> <Link to="/matches">Matches</Link></section>;
   const active = bundle.sets.find(s => s.status === 'active');
   const ordered = [...bundle.games].sort((a,b) => (bundle.sets.find(s => s.id === a.setId)?.ordinal ?? 0) - (bundle.sets.find(s => s.id === b.setId)?.ordinal ?? 0) || a.ordinal - b.ordinal);
   const next = nextGameServer(bundle);
@@ -64,7 +65,7 @@ function ActiveMatchContent({ deps, matchId }: { deps?: MatchServiceDeps; matchI
     {error && <p role="alert">{error}</p>}
     {readOnly && <ReadOnlyNotice disabled={isActive ? 'adding or editing games, recording and finishing the match are' : 'editing games and comments is'} />}
     <form onSubmit={e => { e.preventDefault(); void run(async () => { setBundle(await updateComments(bundle.match.id, comments || null, services)); }); }}><label>Comments<textarea value={comments} onChange={e => setComments(e.target.value)} /></label><button disabled={locked}>Save comments</button></form>
-    {isActive && <div className="live-actions">{!readOnly && <Link className="action-link" to={`/matches/${encodeURIComponent(bundle.match.id)}/record`}>Record with voice</Link>} <button disabled={locked || !active || !!tieKind} onClick={() => { setManual(!manual); setEditing(undefined); }}>Manual game entry</button></div>}
+    {isActive && <div className="live-actions">{!readOnly && <Link className="action-link" to={matchRecordPath(bundle.match.id)}>Record with voice</Link>} <button disabled={locked || !active || !!tieKind} onClick={() => { setManual(!manual); setEditing(undefined); }}>Manual game entry</button></div>}
     {isActive && active && tieKind && <TieBreakForm key={active.id} setId={active.id} kind={tieKind} busy={locked} onSubmit={tie} />}
     {manual && active && !tieKind && <GameForm key={active.id} server={next} busy={locked} onSubmit={add} onCancel={() => setManual(false)} />}
     {editing && <GameForm key={editing.id} game={editing} server={editing.server} busy={locked} onSubmit={input => correct(confirmed => updateGame(editing.id, input, services, confirmed))} onCancel={() => setEditing(undefined)} />}

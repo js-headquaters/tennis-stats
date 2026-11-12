@@ -8,6 +8,7 @@ import type { AudioRecorder } from '../../infrastructure/audio/mediaRecorder';
 import DraftGameCard from './DraftGameCard';
 import { useWorkHold, workRegistry } from '../../app/workGuard';
 import ReadOnlyNotice from '../../components/ReadOnlyNotice';
+import { matchLivePath } from '../../app/routes';
 
 type Service = ReturnType<typeof dependencies.createDraftService>;
 type Scheduler = { schedule(action: () => void, delay: number): () => void };
@@ -43,7 +44,7 @@ function ReviewContent({ draftId, repository, createService = dependencies.creat
         const service = createService(repo); const draft = await repo.getDraft(draftId);
         if (cancelled) return;
         if (!draft) {
-          try { const result = await service.confirmDraft(draftId); if (!cancelled) navigate(`/matches/${encodeURIComponent(result.bundle.match.id)}/live`, { replace:true }); }
+          try { const result = await service.confirmDraft(draftId); if (!cancelled) navigate(matchLivePath(result.bundle.match.id), { replace:true }); }
           catch (e) {
             let missing = false;
             try { missing = safeCode(e) !== 'storage' && !(await repo.getDraftConfirmation(draftId)); } catch { /* Fail closed on storage errors. */ }
@@ -88,13 +89,13 @@ function ReviewContent({ draftId, repository, createService = dependencies.creat
   }
   async function confirm() {
     if (!loaded || dirtyRef.current.size || !begin('confirming')) return;
-    try { const result = await loaded.service.confirmDraft(draftId); if (alive.current) navigate(`/matches/${encodeURIComponent(result.bundle.match.id)}/live`, { replace:true }); }
+    try { const result = await loaded.service.confirmDraft(draftId); if (alive.current) navigate(matchLivePath(result.bundle.match.id), { replace:true }); }
     catch (e) { await refresh(); if (alive.current) failed(e, 'Could not confirm the draft. Please try again.'); }
     finally { if (alive.current) finish(); }
   }
   async function discard() {
     if (!loaded || !begin('discarding')) return;
-    try { await loaded.service.discardDraft(draftId); if (alive.current) navigate(`/matches/${encodeURIComponent(loaded.draft.matchId)}/live`, { replace:true }); }
+    try { await loaded.service.discardDraft(draftId); if (alive.current) navigate(matchLivePath(loaded.draft.matchId), { replace:true }); }
     catch { await refresh(); if (alive.current) { setConfirmingDiscard(false); setError('Could not discard the draft. Please try again.'); } }
     finally { if (alive.current) finish(); }
   }
@@ -151,6 +152,6 @@ function ReviewContent({ draftId, repository, createService = dependencies.creat
         {!stale && discardControls}
       </>}
     </>}
-    <p><Link to={draft ? `/matches/${encodeURIComponent(draft.matchId)}/live` : '/matches'}>Manual entry / live match</Link> <Link to="/settings">Settings</Link></p>
+    <p><Link to={draft ? matchLivePath(draft.matchId) : '/matches'}>Manual entry / live match</Link> <Link to="/settings">Settings</Link></p>
   </section>;
 }
