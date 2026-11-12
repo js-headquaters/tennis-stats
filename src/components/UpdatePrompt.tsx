@@ -5,10 +5,8 @@ import type { UnsafeWorkGuard, WorkStatus } from '../app/workGuard';
 type Props = { controller?: UpdateController; guard?: UnsafeWorkGuard };
 type Status = WorkStatus | 'checking';
 const reasons: Record<Exclude<Status, 'safe'>, string> = {
-  checking: 'Checking for unsaved recordings and drafts…',
+  checking: 'Checking for unsaved recordings and edits…',
   'active-work': 'Finish or save your recording or draft first. Reloading now would lose it.',
-  'draft-in-progress': 'A voice draft is still processing or confirming. Wait for it to finish, or open it and retry, before reloading.',
-  unknown: 'Could not check for unsaved voice drafts, so reloading is paused to protect your data.',
 };
 
 export default function UpdatePrompt({ controller = getUpdateController(), guard = getDefaultWorkGuard() }: Props) {
@@ -22,7 +20,7 @@ export default function UpdatePrompt({ controller = getUpdateController(), guard
   const evaluate = useCallback(async (): Promise<Status> => {
     const id = ++sequence.current; setStatus('checking');
     let next: WorkStatus;
-    try { next = await guard.check(); } catch { next = 'unknown'; }
+    try { next = await guard.check(); } catch { next = 'active-work'; }
     if (alive.current && id === sequence.current) setStatus(next);
     return next;
   }, [guard]);
@@ -48,7 +46,6 @@ export default function UpdatePrompt({ controller = getUpdateController(), guard
     {failed && <p role="alert">The update could not be applied. Your data is unchanged; try again.</p>}
     <div className="update-actions">
       <button type="button" disabled={applying || status !== 'safe'} aria-describedby={reason ? reasonId : undefined} onClick={() => void reload()}>Reload to update</button>
-      {status === 'unknown' && <button type="button" onClick={() => void evaluate()}>Check again</button>}
       <button type="button" onClick={() => setDismissed(true)}>Later</button>
     </div>
   </section>;

@@ -3,14 +3,18 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { expect, it, vi } from 'vitest';
 import type { RecoveryStatus, TennisRepository } from '../../application/ports';
 import type { VoiceDraft } from '../../domain/model';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import DraftReviewPage from './DraftReviewPage';
 import { dependencies } from '../../app/dependencies';
 import { workRegistry } from '../../app/workGuard';
 
 const draft: VoiceDraft = { id:'d', matchId:'m', setId:'s', confirmationId:'c', dataVersion:1, recording:null, mimeType:null, transcripts:[{ text:'Original transcript', provider:'provider', model:'model', timestamp:'now' }], parsedDraft:{ version:1, games:[{ server:'player', result:'won', netErrors:null, wideErrors:0, longErrors:null, doubleFaults:null, failedReturns:null }], warnings:['Check score'] }, state:'ready', error:null, createdAt:'now', updatedAt:'now' };
+const style = document.createElement('style'); style.textContent = readFileSync(resolve(process.cwd(), 'src/styles/global.css'), 'utf8'); document.head.append(style);
+const fittingBundle = { match:{ id:'m', status:'active' }, sets:[{ id:'s', matchId:'m', status:'active', kind:'standard', tieBreakId:null }], games:[], tieBreaks:[] };
 it('shows the saved draft without invoking providers or recording and confirms only on click', async () => {
-  const repository = { getDraft:vi.fn().mockResolvedValue(draft), getMatchBundle:vi.fn().mockResolvedValue({ match:{ id:'m' } }), close:vi.fn(), getRecoveryStatus:() => ({ mode:'normal' as const }) } as unknown as TennisRepository;
-  const service = { retryDraft:vi.fn(), refineDraftWithAudio:vi.fn(), updateDraftGame:vi.fn(), confirmDraft:vi.fn().mockResolvedValue({ status:'confirmed', bundle:{ match:{ id:'m' } } }) };
+  const repository = { getDraft:vi.fn().mockResolvedValue(draft), getMatchBundle:vi.fn().mockResolvedValue(fittingBundle), close:vi.fn(), getRecoveryStatus:() => ({ mode:'normal' as const }) } as unknown as TennisRepository;
+  const service = { retryDraft:vi.fn(), refineDraftWithAudio:vi.fn(), updateDraftGame:vi.fn(), confirmDraft:vi.fn().mockResolvedValue({ status:'confirmed', bundle:{ match:{ id:'m' } } }), discardDraft:vi.fn() };
   const recorder = vi.fn();
   render(<MemoryRouter initialEntries={['/voice/d']}><Routes><Route path="/voice/:draftId" element={<DraftReviewPage repository={repository} createService={() => service} createRecorder={recorder} />} /><Route path="/matches/:matchId/live" element={<p>Live match</p>} /></Routes></MemoryRouter>);
   expect(await screen.findByText('Original transcript')).toBeInTheDocument();
@@ -20,9 +24,9 @@ it('shows the saved draft without invoking providers or recording and confirms o
   expect(await screen.findByText('Live match')).toBeInTheDocument(); expect(service.confirmDraft).toHaveBeenCalledTimes(1);
 });
 
-function setup(initial: VoiceDraft = draft, getRecoveryStatus: () => RecoveryStatus = () => ({ mode:'normal' })) {
-  const repository = { getRecoveryStatus, getDraft:vi.fn().mockResolvedValue(initial), getDraftConfirmation:vi.fn().mockResolvedValue(undefined), getMatchBundle:vi.fn().mockResolvedValue({ match:{ id:'m' } }), close:vi.fn() };
-  const service = { retryDraft:vi.fn().mockResolvedValue(draft), refineDraftWithAudio:vi.fn().mockResolvedValue(draft), updateDraftGame:vi.fn().mockResolvedValue(draft), confirmDraft:vi.fn().mockResolvedValue({ status:'alreadyConfirmed' as const, bundle:{ match:{ id:'m' } } }) };
+function setup(initial: VoiceDraft = draft, getRecoveryStatus: () => RecoveryStatus = () => ({ mode:'normal' }), bundle: unknown = fittingBundle) {
+  const repository = { getRecoveryStatus, getDraft:vi.fn().mockResolvedValue(initial), getDraftConfirmation:vi.fn().mockResolvedValue(undefined), getMatchBundle:vi.fn().mockResolvedValue(bundle), close:vi.fn() };
+  const service = { retryDraft:vi.fn().mockResolvedValue(draft), refineDraftWithAudio:vi.fn().mockResolvedValue(draft), updateDraftGame:vi.fn().mockResolvedValue(draft), confirmDraft:vi.fn().mockResolvedValue({ status:'alreadyConfirmed' as const, bundle:{ match:{ id:'m' } } }), discardDraft:vi.fn().mockResolvedValue(undefined) };
   const recorder = { start:vi.fn().mockResolvedValue(undefined), stop:vi.fn().mockResolvedValue({ blob:new Blob(['audio']), mimeType:'audio/webm' }), cancel:vi.fn().mockResolvedValue(undefined) };
   const view = render(<MemoryRouter initialEntries={['/voice/d']}><Routes><Route path="/voice/:draftId" element={<DraftReviewPage repository={repository as unknown as TennisRepository} createService={() => service} createRecorder={() => recorder} />} /><Route path="/matches/:matchId/live" element={<p>Live match</p>} /></Routes></MemoryRouter>);
   return { repository, service, recorder, view };
@@ -69,7 +73,7 @@ it('resolves a missing draft through durable confirmation', async () => {
 });
 it('closes owned repositories once on failure and retry', async () => {
   const failed = { getDraft:vi.fn().mockRejectedValue(new Error('secret')), close:vi.fn() };
-  const success = { getDraft:vi.fn().mockResolvedValue(draft), getMatchBundle:vi.fn().mockResolvedValue({ match:{ id:'m' } }), close:vi.fn(), getRecoveryStatus:() => ({ mode:'normal' as const }) };
+  const success = { getDraft:vi.fn().mockResolvedValue(draft), getMatchBundle:vi.fn().mockResolvedValue(fittingBundle), close:vi.fn(), getRecoveryStatus:() => ({ mode:'normal' as const }) };
   const open = vi.spyOn(dependencies, 'openDatabase').mockResolvedValueOnce(failed as never).mockResolvedValueOnce(success as never);
   const view = render(<MemoryRouter initialEntries={['/voice/d']}><Routes><Route path="/voice/:draftId" element={<DraftReviewPage />} /></Routes></MemoryRouter>);
   expect(await screen.findByRole('alert')).toHaveTextContent(/could not load/i); expect(failed.close).toHaveBeenCalledTimes(1); fireEvent.click(screen.getByRole('button', { name:'Retry loading' }));
@@ -163,4 +167,60 @@ it('in read-only recovery mode does not auto-process a recorded draft or show a 
   expect(service.retryDraft).not.toHaveBeenCalled();
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   expect(screen.getByRole('note')).toHaveTextContent(/read-only recovery mode/i);
+});
+
+const completedBundle = { ...fittingBundle, match:{ id:'m', status:'active' }, sets:[{ id:'s', matchId:'m', status:'completed', kind:'standard', tieBreakId:null }, { id:'s2', matchId:'m', status:'active', kind:'standard', tieBreakId:null }] };
+const discardButton = () => screen.getByRole('button', { name:'Discard draft' });
+it('discards only after an explicit confirmation step, then opens the live match', async () => {
+  const { service } = setup();
+  fireEvent.click(await screen.findByRole('button', { name:'Discard draft' }));
+  expect(service.discardDraft).not.toHaveBeenCalled();
+  expect(screen.getByText(/delete the recording and transcripts/i)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name:'Keep draft' }));
+  expect(screen.queryByRole('button', { name:'Confirm discard' })).not.toBeInTheDocument();
+  fireEvent.click(discardButton()); fireEvent.click(screen.getByRole('button', { name:'Confirm discard' }));
+  expect(await screen.findByText('Live match')).toBeInTheDocument();
+  expect(service.discardDraft).toHaveBeenCalledTimes(1); expect(service.discardDraft).toHaveBeenCalledWith('d');
+});
+it('locks the page and stays on it with a safe alert when discarding fails', async () => {
+  const { service } = setup(); let reject!: (reason: unknown) => void;
+  service.discardDraft.mockReturnValueOnce(new Promise((_, r) => { reject = r; }));
+  fireEvent.click(await screen.findByRole('button', { name:'Discard draft' }));
+  const confirm = screen.getByRole('button', { name:'Confirm discard' }); fireEvent.click(confirm); fireEvent.click(confirm);
+  expect(service.discardDraft).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole('button', { name:'Start recording' })).toBeDisabled(); expect(screen.getByRole('button', { name:'Confirm and add' })).toBeDisabled();
+  reject(new Error('secret')); expect(await screen.findByRole('alert')).toHaveTextContent(/could not discard/i); expect(document.body).not.toHaveTextContent('secret');
+  expect(screen.queryByText('Live match')).not.toBeInTheDocument(); expect(discardButton()).toBeEnabled();
+});
+it('disables discarding in read-only recovery mode', async () => {
+  const { service } = setup(draft, readOnly);
+  await screen.findByText('Original transcript');
+  expect(discardButton()).toBeDisabled(); fireEvent.click(discardButton());
+  expect(screen.queryByRole('button', { name:'Confirm discard' })).not.toBeInTheDocument(); expect(service.discardDraft).not.toHaveBeenCalled();
+});
+it('keeps the discard controls at least 44px tall', async () => {
+  setup(); fireEvent.click(await screen.findByRole('button', { name:'Discard draft' }));
+  for (const name of ['Discard draft', 'Confirm discard', 'Keep draft']) expect(parseFloat(getComputedStyle(screen.getByRole('button', { name })).minHeight)).toBeGreaterThanOrEqual(44);
+});
+it('explains a draft that no longer fits the match on arrival, disables apply actions and keeps Discard available', async () => {
+  const { service } = setup({ ...draft, state:'waiting-retry' }, () => ({ mode:'normal' }), completedBundle);
+  expect(await screen.findByText(/this draft no longer fits the match/i)).toBeInTheDocument();
+  expect(screen.getByText(/set it was recorded for has already finished/i)).toBeInTheDocument();
+  for (const name of ['Retry processing', 'Confirm and add', 'Start recording']) expect(screen.getByRole('button', { name })).toBeDisabled();
+  expect(discardButton()).toBeEnabled();
+  fireEvent.click(discardButton()); fireEvent.click(screen.getByRole('button', { name:'Confirm discard' }));
+  expect(await screen.findByText('Live match')).toBeInTheDocument(); expect(service.discardDraft).toHaveBeenCalledWith('d');
+});
+it('does not auto-process a freshly recorded draft that no longer fits', async () => {
+  const { service } = setup({ ...draft, state:'recorded', parsedDraft:null, transcripts:[] }, () => ({ mode:'normal' }), completedBundle);
+  expect(await screen.findByText(/this draft no longer fits the match/i)).toBeInTheDocument();
+  await new Promise(resolve => setTimeout(resolve, 20)); expect(service.retryDraft).not.toHaveBeenCalled();
+});
+it.each([['retryDraft', 'waiting-retry', 'Retry processing'], ['confirmDraft', 'ready', 'Confirm and add']] as const)('shows the explanation instead of a generic error when %s reports the draft no longer fits', async (method, state, label) => {
+  const { service } = setup({ ...draft, state });
+  service[method].mockRejectedValueOnce({ code:'not-applicable', message:'secret' });
+  fireEvent.click(await screen.findByRole('button', { name:label }));
+  expect(await screen.findByText(/this draft no longer fits the match/i)).toBeInTheDocument();
+  expect(screen.queryByText(/could not (retry|confirm)/i)).not.toBeInTheDocument(); expect(document.body).not.toHaveTextContent('secret');
+  expect(discardButton()).toBeEnabled(); expect(screen.getByRole('button', { name:label })).toBeDisabled();
 });

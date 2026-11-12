@@ -1,6 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { VoiceDraft } from '../domain/model';
 import { createUnsafeWorkGuard, createWorkRegistry, type WorkStatus } from '../app/workGuard';
 import UpdatePrompt from './UpdatePrompt';
 
@@ -59,12 +58,6 @@ describe('UpdatePrompt', () => {
     fireEvent.click(button); expect(controller.applyUpdate).not.toHaveBeenCalled();
   });
 
-  it('blocks reload while a voice draft is processing or confirming', async () => {
-    render(<UpdatePrompt controller={fakeController()} guard={fakeGuard('draft-in-progress')} />);
-    expect(await screen.findByText(/a voice draft is still processing or confirming/i)).toBeInTheDocument();
-    expect(await reloadButton()).toBeDisabled();
-  });
-
   it('re-evaluates when the guard reports a change', async () => {
     const guard = fakeGuard('active-work');
     render(<UpdatePrompt controller={fakeController()} guard={guard} />);
@@ -86,20 +79,11 @@ describe('UpdatePrompt', () => {
     expect(controller.applyUpdate).not.toHaveBeenCalled();
   });
 
-  it('fails closed with a retryable check when safety cannot be determined', async () => {
-    const guard = fakeGuard('unknown');
-    render(<UpdatePrompt controller={fakeController()} guard={guard} />);
-    expect(await screen.findByText(/could not check for unsaved voice drafts/i)).toBeInTheDocument();
-    expect(await reloadButton()).toBeDisabled();
-    guard.set('safe', false);
-    fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
-    await waitFor(async () => expect(await reloadButton()).toBeEnabled());
-  });
-
-  it('treats a throwing guard as unknown', async () => {
+  it('treats a throwing guard as blocked without leaking the error', async () => {
     const guard = fakeGuard(); guard.check.mockRejectedValue(new Error('secret'));
     render(<UpdatePrompt controller={fakeController()} guard={guard} />);
-    expect(await screen.findByText(/could not check for unsaved voice drafts/i)).toBeInTheDocument();
+    expect(await screen.findByText(/finish or save your recording or draft first/i)).toBeInTheDocument();
+    expect(await reloadButton()).toBeDisabled();
     expect(document.body).not.toHaveTextContent('secret');
   });
 
@@ -123,16 +107,14 @@ describe('UpdatePrompt', () => {
     expect(controller.applyUpdate).not.toHaveBeenCalled();
   });
 
-  it('with the real guard, allows reload with only persisted drafts and blocks on processing or recording', async () => {
-    const registry = createWorkRegistry(); let drafts = [{ id: 'a', state: 'ready' }, { id: 'b', state: 'waiting-retry' }, { id: 'c', state: 'error' }, { id: 'd', state: 'recorded' }] as VoiceDraft[];
-    const guard = createUnsafeWorkGuard({ registry, listDrafts: async () => drafts });
+  it('with the real guard, ignores persisted processing drafts and blocks only on work in this session', async () => {
+    const registry = createWorkRegistry();
+    const guard = createUnsafeWorkGuard({ registry });
     render(<UpdatePrompt controller={fakeController()} guard={guard} />);
     await waitFor(async () => expect(await reloadButton()).toBeEnabled());
     let release!: () => void; act(() => { release = registry.hold(); });
     await waitFor(async () => expect(await reloadButton()).toBeDisabled());
-    drafts = [...drafts, { id: 'e', state: 'processing' } as VoiceDraft];
     act(() => { release(); });
-    expect(await screen.findByText(/a voice draft is still processing or confirming/i)).toBeInTheDocument();
-    expect(await reloadButton()).toBeDisabled();
+    await waitFor(async () => expect(await reloadButton()).toBeEnabled());
   });
 });

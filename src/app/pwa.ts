@@ -1,4 +1,3 @@
-import { dependencies } from './dependencies';
 import { createUnsafeWorkGuard, workRegistry, type UnsafeWorkGuard } from './workGuard';
 
 /**
@@ -46,10 +45,7 @@ let browserConnectivity: ConnectivitySource | undefined;
 export function getBrowserConnectivity() { return browserConnectivity ??= createBrowserConnectivity(); }
 
 let defaultWorkGuard: UnsafeWorkGuard | undefined;
-/** Guard over the app-wide work registry and every persisted voice draft (opened and closed per check). */
+/** Guard over the app-wide in-memory work registry (persisted drafts never block an update). */
 export function getDefaultWorkGuard() {
-  return defaultWorkGuard ??= createUnsafeWorkGuard({ registry: workRegistry, async listDrafts() {
-    const repository = await dependencies.openDatabase();
-    try { return await repository.listDrafts(); } finally { repository.close(); }
-  } });
+  return defaultWorkGuard ??= createUnsafeWorkGuard({ registry: workRegistry });
 }

@@ -1,9 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { VoiceDraft } from '../domain/model';
-import { createUnsafeWorkGuard, createWorkRegistry, UNSAFE_DRAFT_STATES, useWorkHold } from './workGuard';
-
-const draft = (state: VoiceDraft['state']) => ({ id: state, state }) as VoiceDraft;
+import { createUnsafeWorkGuard, createWorkRegistry, useWorkHold } from './workGuard';
 
 describe('work registry', () => {
   it('is busy while any hold is outstanding and releases idempotently', () => {
@@ -35,34 +32,24 @@ describe('work registry', () => {
 });
 
 describe('unsafe work guard', () => {
-  it('treats only processing and confirming drafts as unsafe', () => {
-    expect([...UNSAFE_DRAFT_STATES].sort()).toEqual(['confirming', 'processing']);
-  });
-
-  it('reports active in-memory work before consulting storage', async () => {
-    const registry = createWorkRegistry(); const listDrafts = vi.fn().mockResolvedValue([]);
-    registry.hold();
-    expect(await createUnsafeWorkGuard({ registry, listDrafts }).check()).toBe('active-work');
+  it('is safe when nothing is in flight in this session, even with persisted processing or confirming drafts left by a crash', async () => {
+    const listDrafts = vi.fn().mockResolvedValue([{ id: 'p', state: 'processing' }, { id: 'c', state: 'confirming' }]);
+    // The guard takes no draft lister: persisted rows never block an update.
+    const guard = createUnsafeWorkGuard({ registry: createWorkRegistry(), listDrafts } as Parameters<typeof createUnsafeWorkGuard>[0]);
+    expect(await guard.check()).toBe('safe');
     expect(listDrafts).not.toHaveBeenCalled();
   });
 
-  it('is safe with only persisted recorded, ready, waiting-retry and error drafts', async () => {
-    const guard = createUnsafeWorkGuard({ registry: createWorkRegistry(), listDrafts: async () => ['recorded', 'ready', 'waiting-retry', 'error'].map(state => draft(state as VoiceDraft['state'])) });
+  it('reports active in-memory work', async () => {
+    const registry = createWorkRegistry(); const release = registry.hold();
+    const guard = createUnsafeWorkGuard({ registry });
+    expect(await guard.check()).toBe('active-work');
+    release();
     expect(await guard.check()).toBe('safe');
   });
 
-  it.each(['processing', 'confirming'] as const)('is unsafe with a %s draft', async state => {
-    const guard = createUnsafeWorkGuard({ registry: createWorkRegistry(), listDrafts: async () => [draft('ready'), draft(state)] });
-    expect(await guard.check()).toBe('draft-in-progress');
-  });
-
-  it('fails closed when drafts cannot be listed', async () => {
-    const guard = createUnsafeWorkGuard({ registry: createWorkRegistry(), listDrafts: () => Promise.reject(new Error('secret')) });
-    expect(await guard.check()).toBe('unknown');
-  });
-
   it('notifies subscribers when in-memory work changes', () => {
-    const registry = createWorkRegistry(); const guard = createUnsafeWorkGuard({ registry, listDrafts: async () => [] }); const listener = vi.fn();
+    const registry = createWorkRegistry(); const guard = createUnsafeWorkGuard({ registry }); const listener = vi.fn();
     const unsubscribe = guard.subscribe(listener);
     act(() => { registry.hold()(); });
     expect(listener).toHaveBeenCalledTimes(2);

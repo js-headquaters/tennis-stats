@@ -4,6 +4,7 @@ import type { DraftGame, MatchBundle, VoiceDraft } from '../domain/model';
 import { validateGame } from '../domain/validation';
 import { nextGameServer, prepareGames } from './matchService';
 import { evaluateSet } from '../domain/scoring';
+import { isReadOnlyRecoveryError } from './recovery';
 
 type Phase = 'transcription' | 'parser';
 type Deps = { repository: TennisRepository; transcriber: TranscriptionProvider; parser: StatisticsParser; clock: Clock; ids: IdGenerator; isOnline: () => boolean };
@@ -16,6 +17,20 @@ const messages = { auth: 'Provider authentication failed.', rate: 'Provider rate
 export class DraftStorageError extends Error {
   readonly code = 'storage';
   constructor() { super('Changes could not be saved. Previously saved recordings may still be available.'); this.name = 'DraftStorageError'; }
+}
+
+/** The draft no longer fits its match (the set finished, the match ended, or a tie-break is due): it can only be discarded. */
+export class DraftNotApplicableError extends Error {
+  readonly code = 'not-applicable';
+  constructor() { super('No active standard set for draft'); this.name = 'DraftNotApplicableError'; }
+}
+
+/** Whether a draft for `draft.setId` could still be applied to `bundle` (the single rule used by retry, confirm and the review page). */
+export function draftFitsMatch(bundle: MatchBundle | undefined, draft: Pick<VoiceDraft, 'matchId' | 'setId'>): bundle is MatchBundle {
+  const set = bundle?.sets.find(item => item.id === draft.setId);
+  if (!bundle || bundle.match.status !== 'active' || !set || set.matchId !== draft.matchId || set.status !== 'active' || set.kind !== 'standard') return false;
+  const score = evaluateSet(bundle.games.filter(game => game.setId === set.id), bundle.tieBreaks.find(tie => tie.id === set.tieBreakId) ?? null);
+  return !(score.completed || (score.playerGames === 6 && score.opponentGames === 6));
 }
 
 export function createDraftService({ repository, transcriber, parser, clock, ids, isOnline }: Deps) {
@@ -32,10 +47,7 @@ export function createDraftService({ repository, transcriber, parser, clock, ids
   async function save(draft: VoiceDraft) { const saved = { ...draft, updatedAt: clock.now() }; await storage(() => repository.saveDraft(saved)); return saved; }
   async function applicable(draft: Pick<VoiceDraft, 'matchId' | 'setId'>): Promise<MatchBundle> {
     const bundle = await storage(() => repository.getMatchBundle(draft.matchId));
-    const set = bundle?.sets.find(item => item.id === draft.setId);
-    if (!bundle || bundle.match.status !== 'active' || !set || set.matchId !== draft.matchId || set.status !== 'active' || set.kind !== 'standard') throw new Error('No active standard set for draft');
-    const score = evaluateSet(bundle.games.filter(game => game.setId === set.id), bundle.tieBreaks.find(tie => tie.id === set.tieBreakId) ?? null);
-    if (score.completed || (score.playerGames === 6 && score.opponentGames === 6)) throw new Error('No active standard set for draft');
+    if (!draftFitsMatch(bundle, draft)) throw new DraftNotApplicableError();
     return bundle;
   }
   async function load(id: string) {
@@ -126,7 +138,7 @@ export function createDraftService({ repository, transcriber, parser, clock, ids
     try {
       await save({ ...draft, state: 'confirming', error: null });
       const found = await applicable(draft);
-      if (found.sets.find(s => s.status === 'active')?.id !== draft.setId) throw new Error('No active standard set for draft');
+      if (found.sets.find(s => s.status === 'active')?.id !== draft.setId) throw new DraftNotApplicableError();
       if (!draftSchema.safeParse(draft.parsedDraft).success) throw new Error('Invalid draft games');
       const prepared = prepareGames(found, draft.parsedDraft.games, { clock, ids });
       const result = await storage(() => repository.confirmDraft(id, draft.confirmationId, prepared, clock.now(), found));
@@ -142,7 +154,7 @@ export function createDraftService({ repository, transcriber, parser, clock, ids
         if (raced) return raced;
         throw new DraftStorageError();
       }
-      if (error instanceof DraftStorageError) throw error;
+      if (error instanceof DraftStorageError || error instanceof DraftNotApplicableError) throw error;
       // Untrusted errors must not be exposed through Error.cause.
       // eslint-disable-next-line preserve-caught-error
       throw new Error('Draft could not be confirmed.');
@@ -155,5 +167,16 @@ export function createDraftService({ repository, transcriber, parser, clock, ids
     confirmations.set(id, promise);
     return promise;
   }
-  return { persistDraftFromAudio, createDraftFromAudio, retryDraft, refineDraftWithAudio, updateDraftGame, confirmDraft };
+  /**
+   * Deletes the draft row (audio, transcripts and parsed games with it). Idempotent; never touches match data or
+   * confirmation markers. Refused while the draft is processing or confirming in this session.
+   */
+  function discardDraft(id: string): Promise<void> {
+    if (confirmations.has(id)) return Promise.reject(new Error('Draft is already processing'));
+    return guard(id, async () => {
+      try { await repository.deleteDraft(id); }
+      catch (error) { throw isReadOnlyRecoveryError(error) ? error : new DraftStorageError(); }
+    });
+  }
+  return { persistDraftFromAudio, createDraftFromAudio, retryDraft, refineDraftWithAudio, updateDraftGame, confirmDraft, discardDraft };
 }

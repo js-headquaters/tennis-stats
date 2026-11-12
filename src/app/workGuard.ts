@@ -1,5 +1,4 @@
 import { useEffect } from 'react';
-import type { VoiceDraft } from '../domain/model';
 
 /**
  * In-memory registry of work that would be lost by a page reload (an in-progress recording, audio not yet
@@ -36,29 +35,19 @@ export function useWorkHold(active: boolean, registry: WorkRegistry = workRegist
 }
 
 /**
- * Persisted draft states that are mid-operation: a reload would interrupt provider processing or the
- * confirmation write. `recorded`, `ready`, `waiting-retry` and `error` drafts are fully persisted in IndexedDB
- * with their audio/transcripts and are resumable after a reload, so they do not block an update.
+ * Only work in flight in THIS session (the in-memory registry) blocks an update. Drafts persisted as `processing` or
+ * `confirming` (e.g. left by a crash) are recoverable via Retry/Resume/Discard and must never block "Reload to update".
  */
-export const UNSAFE_DRAFT_STATES: ReadonlySet<VoiceDraft['state']> = new Set<VoiceDraft['state']>(['processing', 'confirming']);
-
-export type WorkStatus = 'safe' | 'active-work' | 'draft-in-progress' | 'unknown';
+export type WorkStatus = 'safe' | 'active-work';
 export interface UnsafeWorkGuard {
-  /** Resolves the current status; never rejects for storage failures (they report `unknown`). */
   check(): Promise<WorkStatus>;
   /** Notified when the status may have changed. */
   subscribe(listener: () => void): () => void;
 }
 
-export function createUnsafeWorkGuard({ registry, listDrafts }: { registry: WorkRegistry; listDrafts: () => Promise<Pick<VoiceDraft, 'state'>[]> }): UnsafeWorkGuard {
+export function createUnsafeWorkGuard({ registry }: { registry: WorkRegistry }): UnsafeWorkGuard {
   return {
-    async check() {
-      if (registry.isBusy()) return 'active-work';
-      let drafts;
-      try { drafts = await listDrafts(); } catch { return 'unknown'; }
-      if (registry.isBusy()) return 'active-work';
-      return drafts.some(draft => UNSAFE_DRAFT_STATES.has(draft.state)) ? 'draft-in-progress' : 'safe';
-    },
+    check: async () => (registry.isBusy() ? 'active-work' : 'safe'),
     subscribe: listener => registry.subscribe(listener),
   };
 }

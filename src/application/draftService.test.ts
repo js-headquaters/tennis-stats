@@ -5,6 +5,7 @@ import { openDatabase } from '../infrastructure/db/database';
 import { startMatch } from './matchService';
 import { createDraftService } from './draftService';
 import type { StatisticsParser, TranscriptionProvider } from './ports';
+import { ReadOnlyRecoveryError } from './recovery';
 
 const clock = { now: () => '2026-01-01T00:00:00.000Z' };
 let n = 0;
@@ -298,5 +299,73 @@ describe('draft processing', () => {
     expect(persisted?.parsedDraft).toEqual(parsed);
     expect(persisted?.state).toBe('ready');
     expect(transcriber.transcribe).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('discarding drafts', () => {
+  const input = (match: { match: { id: string }; sets: Array<{ id: string }> }) => ({ matchId: match.match.id, setId: match.sets[0].id, audio: new Blob(['audio']), mimeType: 'audio/mp4' });
+  it('deletes the draft and its audio, is idempotent and leaves match data untouched', async () => {
+    const { service, match, repository } = await setup();
+    const draft = await service.persistDraftFromAudio(input(match));
+    const before = await repository.getMatchBundle(match.match.id);
+    await service.discardDraft(draft.id);
+    expect(await repository.getDraft(draft.id)).toBeUndefined();
+    await expect(service.discardDraft(draft.id)).resolves.toBeUndefined();
+    await expect(service.discardDraft('never-existed')).resolves.toBeUndefined();
+    expect(await repository.getMatchBundle(match.match.id)).toEqual(before);
+  });
+  it('only removes the named draft', async () => {
+    const { service, match, repository } = await setup();
+    const a = await service.persistDraftFromAudio(input(match)); const b = await service.persistDraftFromAudio(input(match));
+    await service.discardDraft(a.id);
+    expect(await repository.getDraft(b.id)).toBeDefined();
+  });
+  it('does not resurrect or duplicate an already confirmed draft', async () => {
+    const { service, match, repository } = await setup();
+    const draft = await service.createDraftFromAudio(input(match), new AbortController().signal);
+    await service.confirmDraft(draft.id);
+    const games = (await repository.getMatchBundle(match.match.id))?.games.length;
+    await service.discardDraft(draft.id);
+    expect(await repository.getDraft(draft.id)).toBeUndefined();
+    expect(await repository.getDraftConfirmation(draft.id)).toBeDefined();
+    expect((await repository.getMatchBundle(match.match.id))?.games).toHaveLength(games!);
+    expect((await service.confirmDraft(draft.id)).status).toBe('alreadyConfirmed');
+  });
+  it('is refused with the read-only recovery error and keeps the draft', async () => {
+    const { service, match, repository } = await setup();
+    const draft = await service.persistDraftFromAudio(input(match));
+    vi.spyOn(repository, 'deleteDraft').mockRejectedValueOnce(new ReadOnlyRecoveryError());
+    await expect(service.discardDraft(draft.id)).rejects.toBeInstanceOf(ReadOnlyRecoveryError);
+    expect(await repository.getDraft(draft.id)).toBeDefined();
+  });
+  it('reports other storage failures as a safe storage error', async () => {
+    const { service, match, repository } = await setup();
+    const draft = await service.persistDraftFromAudio(input(match));
+    vi.spyOn(repository, 'deleteDraft').mockRejectedValueOnce(new Error('secret'));
+    await expect(service.discardDraft(draft.id)).rejects.toMatchObject({ code: 'storage' });
+  });
+  it('refuses while the draft is being processed', async () => {
+    const { service, match, transcriber, repository } = await setup();
+    let release!: () => void;
+    transcriber.transcribe.mockImplementationOnce(() => new Promise(resolve => { release = () => resolve({ text: 'x', provider: 'p', model: 'm' }); }));
+    const draft = await service.persistDraftFromAudio(input(match));
+    const running = service.retryDraft(draft.id, new AbortController().signal);
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    await expect(service.discardDraft(draft.id)).rejects.toThrow('already processing');
+    release(); await running;
+    expect(await repository.getDraft(draft.id)).toBeDefined();
+  });
+  it('marks a draft whose set already completed as not applicable, and it can still be discarded', async () => {
+    const { service, match, repository } = await setup();
+    const draft = await service.createDraftFromAudio(input(match), new AbortController().signal);
+    const bundle = structuredClone(match);
+    bundle.games = Array.from({ length: 6 }, (_, i) => ({ id: `won-${i}`, setId: bundle.sets[0].id, ordinal: i + 1, server: i % 2 ? 'opponent' as const : 'player' as const, result: 'won' as const, score: null, netErrors: null, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null, createdAt: clock.now(), updatedAt: clock.now() }));
+    bundle.sets[0].status = 'completed'; bundle.sets.push({ ...bundle.sets[0], id: 'set-2', ordinal: 2, status: 'active' });
+    await repository.saveMatchBundle(bundle);
+    await expect(service.retryDraft(draft.id, new AbortController().signal)).rejects.toMatchObject({ code: 'not-applicable' });
+    await expect(service.confirmDraft(draft.id)).rejects.toMatchObject({ code: 'not-applicable' });
+    await service.discardDraft(draft.id);
+    expect(await repository.getDraft(draft.id)).toBeUndefined();
+    expect((await repository.getMatchBundle(match.match.id))?.games).toHaveLength(6);
   });
 });
