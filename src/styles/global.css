@@ -9,3 +9,13 @@
 .match-setup .touch-link, .match-setup .radio-choice { display: inline-flex; align-items: center; padding: .5rem; }
 .match-setup .radio-choice { gap: .5rem; }
 .match-setup fieldset { min-width: 0; }
+.live-match { padding-bottom: 6rem; }
+.live-match button, .live-match input, .live-match select, .live-match textarea, .live-match a { min-height: 44px; min-width: 44px; font: inherit; }
+.live-match button, .live-match input, .live-match select, .live-match textarea { padding: .5rem; }
+.live-match label { display: block; margin: .75rem 0; }
+.live-match label input, .live-match label select, .live-match label textarea { display: block; width: 100%; max-width: 30rem; }
+.live-match form, .game-card, .confirmation { border: 1px solid var(--border); border-radius: .5rem; padding: 1rem; margin: 1rem 0; }
+.metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr)); gap: .5rem; }
+.metric { border: 1px solid var(--border); padding: .75rem; display: flex; flex-direction: column; }
+.metric strong { font-size: 1.5rem; }
+.live-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; }
