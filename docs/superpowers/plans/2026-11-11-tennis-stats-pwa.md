@@ -566,9 +566,9 @@ Before calling the project complete:
 **Files:** Modify `src/application/draftService.ts`, `src/application/draftService.test.ts`, `src/features/voice/DraftReviewPage.tsx` (+ test), `src/app/workGuard.ts` (+ test), `src/components/UpdatePrompt.tsx` (+ test).
 **Note:** an earlier interrupted attempt left uncommitted edits in `draftService.ts`, `draftService.test.ts`, `ports.ts`; audit them with `git diff` first and keep or discard them deliberately.
 
-- [ ] **Step 1: Failing tests** — a draft-service `discardDraft(id)` that deletes the draft and its audio (idempotent, refused in read-only recovery); DraftReviewPage "Discard draft" with explicit confirmation step, disabled in recovery; an unappliable draft (`applicable()` fails because the set already completed) shows an explanatory message instead of a generic error and offers Discard; work guard ignores persisted `processing`/`confirming` rows (only in-session registry work blocks "Reload to update").
-- [ ] **Step 2: Implement** the service function, the page control (44px, text states), and the guard change; supersede the Task 12 ruling in the report.
-- [ ] **Step 3: Verify and commit** — focused tests, `npm test`, `npm run typecheck`, `npm run lint`; commit `fix: make voice drafts discardable`.
+- [x] **Step 1: Failing tests** — a draft-service `discardDraft(id)` that deletes the draft and its audio (idempotent, refused in read-only recovery); DraftReviewPage "Discard draft" with explicit confirmation step, disabled in recovery; an unappliable draft (`applicable()` fails because the set already completed) shows an explanatory message instead of a generic error and offers Discard; work guard ignores persisted `processing`/`confirming` rows (only in-session registry work blocks "Reload to update").
+- [x] **Step 2: Implement** the service function, the page control (44px, text states), and the guard change; supersede the Task 12 ruling in the report.
+- [x] **Step 3: Verify and commit** — focused tests, `npm test`, `npm run typecheck`, `npm run lint`; commit `fix: make voice drafts discardable`.
 
 ### Task 16: Cancelable AI Processing with Timeout (I-2)
 
