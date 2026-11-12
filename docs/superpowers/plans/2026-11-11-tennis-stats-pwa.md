@@ -606,9 +606,9 @@ Before calling the project complete:
 
 **Files:** Modify `src/app/router.tsx`, `src/styles/global.css`, `src/features/settings/AiSettingsSection.tsx`, link call sites in `MatchHistoryPage.tsx`, `DashboardPage.tsx`, `StartMatchPage.tsx`, tests.
 
-- [ ] **Step 1: Failing tests** — unknown hash route and render errors show a friendly not-found/error page with Home/Matches/Settings links (44px); match ids containing `/` and `#` round-trip through links; AI settings controls and live-match load-error controls meet 44px against the real stylesheet.
-- [ ] **Step 2: Implement (shared route helper only if it removes duplication).**
-- [ ] **Step 3: Verify and commit** — `fix: harden routing links and touch targets`.
+- [x] **Step 1: Failing tests** — unknown hash route and render errors show a friendly not-found/error page with Home/Matches/Settings links (44px); match ids containing `/` and `#` round-trip through links; AI settings controls and live-match load-error controls meet 44px against the real stylesheet.
+- [x] **Step 2: Implement (shared route helper only if it removes duplication).**
+- [x] **Step 3: Verify and commit** — `fix: harden routing links and touch targets`.
 
 ### Task 21: Recovery Export and Backup Opponent Validation (M-9, T11-#2)
 
