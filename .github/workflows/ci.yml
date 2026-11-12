@@ -1,0 +1,79 @@
+name: CI
+
+# Runs on pull requests and on pushes to develop (the deployment branch). Feature-branch pushes are covered by their
+# pull request, so building every branch push as well would only duplicate runs.
+on:
+  pull_request:
+  push:
+    branches: [develop]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Typecheck, lint, tests, build, smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # Third-party actions are pinned to major tags. Pinning to full commit SHAs is a recommended hardening.
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium webkit
+      - name: Type check
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Unit and integration tests
+        run: npm test
+      - name: Production build
+        run: npm run build
+      - name: Verify PWA output
+        run: npm run verify:pwa
+      - name: Playwright smoke tests
+        run: npm run test:e2e -- --grep @smoke --project=chromium --project=webkit
+      - name: Upload Playwright artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-smoke-artifacts
+          path: |
+            playwright-report
+            test-results
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # The full browser suite runs in parallel with the smoke gate so total CI time stays close to the slower of the two.
+  # Because the Pages workflow only deploys when the whole CI run succeeds, both jobs must pass before deployment.
+  e2e-full:
+    name: Full Playwright suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium webkit
+      - name: Playwright full suite (builds and serves the production bundle)
+        run: npm run test:e2e -- --project=chromium --project=webkit
+      - name: Upload Playwright artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-full-artifacts
+          path: |
+            playwright-report
+            test-results
+          retention-days: 7
+          if-no-files-found: ignore
