@@ -22,6 +22,10 @@ it('offers ordered formats, editable date, first server and creates a new oppone
   const format = await screen.findByLabelText('Format');
   expect(Array.from((format as HTMLSelectElement).options).map(o => o.text)).toEqual(['Two sets plus deciding super tie-break', 'Open/practice match with manual completion', 'One set', 'Best of three sets']);
   expect(format).toHaveValue('twoSetsSuperTiebreak');
+  for (const value of ['twoSetsSuperTiebreak', 'openPractice', 'oneSet', 'bestOfThree']) {
+    fireEvent.change(format, { target: { value } });
+    expect(format).toHaveValue(value);
+  }
   fireEvent.change(screen.getByLabelText('Opponent'), { target: { value: ' Jamie ' } });
   fireEvent.change(screen.getByLabelText('Date and time'), { target: { value: '2026-02-03T14:30' } });
   fireEvent.click(screen.getByLabelText('Opponent serves first'));
@@ -39,4 +43,25 @@ it('filters suggestions and explicitly resolves an active match', async () => {
   await waitFor(() => expect(screen.queryByText(/complete or abandon/i)).not.toBeInTheDocument());
   fireEvent.change(screen.getByLabelText('Opponent'), { target: { value: 'ale' } });
   expect(document.querySelector('#opponent-suggestions option[value="Alex"]')).toBeInTheDocument();
+  // Browsers apply a datalist selection by setting the associated input's value.
+  fireEvent.change(screen.getByLabelText('Opponent'), { target: { value: 'Alex' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Start match' }));
+  await screen.findByText('Live placeholder');
+  expect((await deps.repository.getActiveMatch())?.opponent.id).toBe(first.opponent.id);
+  expect(await deps.repository.listOpponents()).toHaveLength(1);
+});
+it.each([
+  ['Two sets plus deciding super tie-break', 'twoSetsSuperTiebreak'],
+  ['Open/practice match with manual completion', 'openPractice'],
+  ['One set', 'oneSet'],
+  ['Best of three sets', 'bestOfThree'],
+])('starts a match with selected format %s', async (_label, value) => {
+  const deps = await setup(); show(deps);
+  const format = await screen.findByLabelText('Format');
+  fireEvent.change(format, { target: { value } });
+  expect(format).toHaveValue(value);
+  fireEvent.change(screen.getByLabelText('Opponent'), { target: { value: 'Jamie' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Start match' }));
+  await screen.findByText('Live placeholder');
+  expect((await deps.repository.getActiveMatch())?.match.format).toBe(value);
 });
