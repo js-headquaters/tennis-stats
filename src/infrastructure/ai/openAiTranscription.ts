@@ -1,0 +1,13 @@
+import type { TranscriptionProvider, TranscriptionSettings } from '../../application/ports';
+import { requestJson, SafeProviderError, validateConfig } from './common';
+
+export function createOpenAiTranscription(config: TranscriptionSettings, fetcher: typeof fetch = fetch): TranscriptionProvider {
+  return { async transcribe(request, signal) {
+    validateConfig(config); const body = new FormData();
+    body.append('file', request.audio, `recording.${request.mimeType.includes('wav') ? 'wav' : request.mimeType.includes('mp4') ? 'mp4' : 'webm'}`); body.append('model', config.model);
+    if (request.language) body.append('language', request.language); if (request.context) body.append('prompt', request.context);
+    const response = await requestJson(fetcher, config.endpoint || 'https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${config.apiKey}` }, body }, signal);
+    if (!response || typeof response !== 'object' || !('text' in response) || typeof response.text !== 'string') throw new SafeProviderError('invalid-response');
+    return { text: response.text, provider: 'openai', model: config.model };
+  } };
+}

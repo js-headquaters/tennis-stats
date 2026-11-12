@@ -2,6 +2,7 @@ import { createHashRouter } from 'react-router-dom';
 import AppShell from '../components/AppShell';
 import DashboardPage from '../features/dashboard/DashboardPage';
 import StartMatchPage from '../features/matches/StartMatchPage';
+import SettingsPage from '../features/settings/SettingsPage';
 
 function Placeholder({ title }: { title: string }) { return <><h1>{title}</h1><p>Coming soon.</p></>; }
 
@@ -12,5 +13,5 @@ export const router = createHashRouter([{ element: <AppShell />, children: [
   { path: '/matches/:matchId', element: <Placeholder title="Match" /> },
   { path: '/matches/:matchId/live', element: <Placeholder title="Live match" /> },
   { path: '/voice/:draftId', element: <Placeholder title="Voice draft" /> },
-  { path: '/settings', element: <Placeholder title="Settings" /> },
+  { path: '/settings', element: <SettingsPage /> },
 ]}]);
