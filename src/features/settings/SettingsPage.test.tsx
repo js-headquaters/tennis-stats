@@ -1,3 +1,4 @@
+import 'fake-indexeddb/auto';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import SettingsPage from './SettingsPage';

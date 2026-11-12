@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { openDatabase } from '../infrastructure/db/database';
 import type { MatchBundle, VoiceDraft } from '../domain/model';
-import { applyImport, backupFileName, exportBackup, previewImport, previewMerge, serializeBackup, type ImportPreview } from './backupService';
+import { applyImport, backupFileName, clearAllData, exportBackup, previewImport, previewMerge, serializeBackup, type ImportPreview } from './backupService';
 
 const fixture = (name: string) => readFileSync(new URL(`../test/fixtures/${name}`, import.meta.url), 'utf8');
 const v1Text = fixture('backup-v1.json');
@@ -255,5 +255,27 @@ describe('applyImport', () => {
     vi.spyOn(repo, 'snapshot').mockResolvedValueOnce({ ...before, games: [] }); // stale read: the collision is only found inside the write transaction
     await expect(applyImport(preview, 'merge', repo)).rejects.toThrow();
     expect(await repo.snapshot()).toEqual(before);
+  });
+});
+
+describe('clearAllData', () => {
+  it('removes every tennis record and draft in one replace and reports what was removed', async () => {
+    const repo = await seeded();
+    const match = (await repo.listMatches())[0];
+    await repo.saveDraft(draft('d1', match.id, ''));
+    const removed = await clearAllData(repo);
+    expect(removed).toEqual({ opponents: 2, matches: 2, sets: 2, games: 3, tieBreaks: 1, voiceDrafts: 1 });
+    const after = await repo.snapshot();
+    expect(after).toMatchObject({ opponents: [], matches: [], sets: [], games: [], tieBreaks: [], voiceDrafts: [] });
+    expect(after.dataVersion).toBeGreaterThan(0);
+    await repo.saveMatchBundle(ownBundle('after-clear', 'active'));
+    expect((await repo.listMatches()).map(m => m.id)).toEqual(['after-clear']);
+  });
+
+  it('leaves data untouched when the write fails', async () => {
+    const repo = await seeded(); const before = JSON.stringify(await repo.snapshot());
+    vi.spyOn(repo, 'replaceAll').mockRejectedValueOnce(new Error('boom'));
+    await expect(clearAllData(repo)).rejects.toThrow();
+    expect(JSON.stringify(await repo.snapshot())).toBe(before);
   });
 });

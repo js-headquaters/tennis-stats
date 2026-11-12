@@ -349,3 +349,13 @@ export async function applyImport(preview: ImportPreview, mode: ImportMode, repo
   if (ENTITY_TYPES.some(entity => plan.additions[entity].length)) await repo.insertRecords(plan.additions);
   return { mode, summary: plan.summary, conflicts: plan.conflicts, remaps: plan.remaps, rejected: preview.rejected, draftsKept: current.voiceDrafts.length, draftsDiscarded: 0 };
 }
+
+// ---------- clear ----------
+
+export type ClearedCounts = Record<EntityType | 'voiceDrafts', number>;
+/** Deletes every tennis record and voice draft in one repository transaction. Local-storage AI settings are not touched. */
+export async function clearAllData(repo: TennisRepository): Promise<ClearedCounts> {
+  const current = await repo.snapshot();
+  await repo.replaceAll({ dataVersion: current.dataVersion, opponents: [], matches: [], sets: [], games: [], tieBreaks: [], voiceDrafts: [] });
+  return { opponents: current.opponents.length, matches: current.matches.length, sets: current.sets.length, games: current.games.length, tieBreaks: current.tieBreaks.length, voiceDrafts: current.voiceDrafts.length };
+}

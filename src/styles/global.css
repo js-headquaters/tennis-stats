@@ -72,3 +72,12 @@
 .match-averages table { border-collapse: collapse; width: 100%; }
 .match-averages th, .match-averages td { text-align: left; padding: .5rem; border-bottom: 1px solid var(--border); font-size: 1.125rem; }
 .match-averages th small { display: block; font-size: .875rem; font-weight: 400; }
+.data-settings { min-width: 0; }
+.data-settings button, .data-settings input { min-height: 44px; min-width: 44px; padding: .5rem; font: inherit; }
+.data-settings label { display: block; margin: .75rem 0; }
+.data-settings label input { display: block; width: 100%; max-width: 30rem; }
+.data-settings .data-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin: .75rem 0; }
+.data-settings .data-confirm { border: 2px solid var(--border); border-radius: .5rem; padding: 1rem; margin: 1rem 0; }
+.data-settings .table-scroll { overflow-x: auto; }
+.data-settings table { border-collapse: collapse; margin: .75rem 0; }
+.data-settings th, .data-settings td { border: 1px solid var(--border); padding: .25rem .5rem; text-align: left; }

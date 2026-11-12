@@ -5,6 +5,7 @@ import { createOpenAiTranscription } from '../../infrastructure/ai/openAiTranscr
 import { createOpenAiParser } from '../../infrastructure/ai/openAiParser';
 import { createAnthropicParser } from '../../infrastructure/ai/anthropicParser';
 import { AiSettingsSection } from './AiSettingsSection';
+import { DataSettingsSection, type DataDeps } from './DataSettingsSection';
 
 type Settings = ParserSettings | TranscriptionSettings;
 function silentAudio(): Blob {
@@ -18,12 +19,15 @@ async function defaultTest(kind: AiKind, settings: Settings) {
   if (kind === 'transcription') await createOpenAiTranscription(settings as TranscriptionSettings).transcribe({ audio: silentAudio(), mimeType: 'audio/wav' }, signal);
   else await (settings.provider === 'anthropic' ? createAnthropicParser(settings) : createOpenAiParser(settings)).parse({ transcript: '' }, signal);
 }
-export default function SettingsPage({ store = createLocalSettings(localStorage), testConnection = defaultTest }: { store?: AiSettingsStore; testConnection?: (kind: AiKind, settings: Settings) => Promise<void> }) {
-  const owner = useRef<AiKind | null>(null); const [pending, setPending] = useState(false);
-  const acquire = (kind: AiKind) => { if (owner.current !== null) return false; owner.current = kind; setPending(true); return true; };
-  const release = (kind: AiKind) => { if (owner.current === kind) { owner.current = null; setPending(false); } };
+/** Owner of the page-wide lock: an AI connection test or a data action. While one runs, every Settings section is disabled. */
+type LockOwner = AiKind | 'data';
+export default function SettingsPage({ store = createLocalSettings(localStorage), testConnection = defaultTest, data }: { store?: AiSettingsStore; testConnection?: (kind: AiKind, settings: Settings) => Promise<void>; data?: DataDeps }) {
+  const owner = useRef<LockOwner | null>(null); const [pending, setPending] = useState(false);
+  const acquire = (kind: LockOwner) => { if (owner.current !== null) return false; owner.current = kind; setPending(true); return true; };
+  const release = (kind: LockOwner) => { if (owner.current === kind) { owner.current = null; setPending(false); } };
   return <><h1>Settings</h1><p>Client-side browser-held API keys are exposed to risk. Use restricted, expiring keys with hard spend limits.</p>
     <AiSettingsSection title="Transcription" kind="transcription" initial={store.getTranscription()} save={value => store.saveTranscription(value as TranscriptionSettings)} clear={() => store.clear('transcription')} testConnection={testConnection} pending={pending} acquire={acquire} release={release} />
     <AiSettingsSection title="Statistics parser" kind="parser" initial={store.getParser()} save={value => store.saveParser(value)} clear={() => store.clear('parser')} testConnection={testConnection} pending={pending} acquire={acquire} release={release} />
+    <DataSettingsSection deps={data} pending={pending} acquire={acquire} release={release} />
   </>;
 }
