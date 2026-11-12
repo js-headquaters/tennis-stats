@@ -58,7 +58,14 @@ npm ci && npm run typecheck && npm run lint && npm test && npm run build && npm 
 1. **CI** (`.github/workflows/ci.yml`) runs on pull requests and on pushes to `develop`. One job runs type check, lint, unit/integration tests, production build, `verify:pwa` and the Playwright smoke tests; a second job runs the full Playwright suite. Playwright reports and traces are uploaded only on failure.
 2. **Deploy** (`.github/workflows/pages.yml`) runs only after a CI run for a push to `develop` finishes successfully (or by manual dispatch from `develop`). It rebuilds the exact commit CI verified, re-runs `verify:pwa`, and publishes `dist/` to GitHub Pages. Pull requests never deploy.
 
-First-time repository setup: in GitHub go to **Settings -> Pages** and set **Source** to **GitHub Actions**. Optionally protect `develop` and require the CI jobs to pass.
+First-time repository setup (all required for deployment to work):
+
+1. Push `develop` first to the empty remote so it becomes the repository's **default branch** (do not create `main` first). GitHub runs `workflow_run` workflows from the default branch's copy of `pages.yml`; if the default branch is anything else, Pages silently never deploys.
+2. **Settings -> Pages**: set **Source** to **GitHub Actions**.
+3. **Settings -> Environments -> github-pages**: make sure the deployment branch rule allows `develop` (needed for both automatic and manual deploys).
+4. Optionally protect `develop` and require the CI jobs to pass.
+
+Manual dispatch of the Deploy workflow publishes the current `develop` head **without the CI gate** (it only builds and runs `verify:pwa`), so use it deliberately.
 
 ## Real-device testing
 

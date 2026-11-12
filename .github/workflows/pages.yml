@@ -1,6 +1,13 @@
 name: Deploy to GitHub Pages
 
 # Deploys only the commit that a successful CI run verified on develop. Pull-request runs never deploy.
+#
+# Repository preconditions (otherwise deployment silently never happens or is rejected):
+# - `workflow_run` triggers run the workflow file from the repository's DEFAULT branch, so the default branch must be
+#   `develop` (this file must exist there). Push `develop` first to the empty remote; do not create `main` first.
+# - Settings -> Environments -> github-pages: the deployment branch rule must allow `develop` (also for manual dispatch).
+# - Settings -> Pages -> Source = GitHub Actions.
+# Manual workflow_dispatch deploys the current develop head WITHOUT the CI gate (it only builds and runs verify:pwa).
 on:
   workflow_run:
     workflows: [CI]
@@ -24,6 +31,7 @@ jobs:
     # workflow_run: CI must have succeeded for a push to develop. workflow_dispatch: only when run from develop.
     if: >-
       (github.event_name == 'workflow_run'
+        && github.event.workflow_run.head_repository.full_name == github.repository
         && github.event.workflow_run.conclusion == 'success'
         && github.event.workflow_run.event == 'push'
         && github.event.workflow_run.head_branch == 'develop')

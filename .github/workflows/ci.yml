@@ -1,7 +1,8 @@
 name: CI
 
 # Runs on pull requests and on pushes to develop (the deployment branch). Feature-branch pushes are covered by their
-# pull request, so building every branch push as well would only duplicate runs.
+# pull request. A pull request whose head branch is develop (e.g. a develop -> main release PR) triggers both a push
+# run and a pull_request run; the two use different concurrency groups, so both execute.
 on:
   pull_request:
   push:
