@@ -12,6 +12,7 @@ import { COMPLETION_LABEL, FORMAT_LABEL } from './MatchHistoryPage';
 import MatchMetadataForm from './MatchMetadataForm';
 import MatchSetDetails from './MatchSetDetails';
 import TieBreakForm from './TieBreakForm';
+import ReadOnlyNotice from '../../components/ReadOnlyNotice';
 
 type Correction = { conflicts: GameConflict[]; run: (confirmed: boolean) => Promise<CorrectionResult> };
 type Editing = { kind: 'game'; game: Game } | { kind: 'tieBreak'; tieBreak: TieBreak };
@@ -68,7 +69,9 @@ function MatchDetailsContent({ deps, matchId }: { deps?: MatchServiceDeps; match
   if (loadError || !services) return <section className="match-details"><h1>Match</h1><p role="alert">Could not load match: {loadError}</p><button type="button" onClick={() => { setLoading(true); setLoadError(''); setAttempt(a => a + 1); }}>Retry</button> <Link className="touch-link" to="/matches">Back to matches</Link></section>;
   if (!bundle) return <section className="match-details"><h1>Match not found</h1><p>This match does not exist or was deleted.</p><Link className="touch-link" to="/matches">Back to matches</Link></section>;
 
-  const blocked = busy || !!correction;
+  // Read-only recovery mode: every correction write is refused, so the controls are disabled and explained.
+  const readOnly = services.repository.getRecoveryStatus().mode === 'readOnly';
+  const blocked = busy || !!correction || readOnly;
   const sets = [...bundle.sets].sort((a, b) => a.ordinal - b.ordinal);
   const slot = (setId: string) => (gameId: string | null) => {
     if (editing?.kind === 'game' && gameId === editing.game.id) return <GameForm key={editing.game.id} game={editing.game} server={editing.game.server} busy={blocked} onSubmit={input => correct(confirmed => updateGame(editing.game.id, input, services, confirmed))} onCancel={() => setEditing(undefined)} />;
@@ -90,6 +93,7 @@ function MatchDetailsContent({ deps, matchId }: { deps?: MatchServiceDeps; match
     <p><Link className="touch-link" to="/matches">Back to matches</Link>{bundle.match.status === 'active' && <> <Link className="touch-link" to={`/matches/${encodeURIComponent(bundle.match.id)}/live`}>Continue live match</Link></>}</p>
     {error && <p role="alert">{error}</p>}
     {notice && <p role="status">{notice}</p>}
+    {readOnly && <ReadOnlyNotice disabled="correcting games, tie-breaks, match details and comments is" />}
     {correction && <CorrectionConfirmation conflicts={correction.conflicts} busy={busy} onConfirm={() => void run(async () => applied((await correction.run(true)).bundle, 'Correction saved.'))} onCancel={() => setCorrection(undefined)} />}
     <MatchAverages games={bundle.games} />
     {sets.map(set => <MatchSetDetails key={set.id} bundle={bundle} set={set} disabled={blocked}

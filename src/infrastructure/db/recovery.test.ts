@@ -27,6 +27,13 @@ function diagnosticsOf(status: RecoveryStatus): SafeDiagnostics {
 const ALLOWED_KEYS = ['appDataVersion', 'appVersion', 'code', 'errorName', 'failedStep', 'message', 'storedDataVersion'];
 
 describe('getRecoveryStatus', () => {
+  it.each(['TypeError', 'ConstraintError', 'DatabaseClosedError', 'AbortError'])('reports the known error name %s', async errorName => {
+    const name = dbName(); await seed(name, 1);
+    const error = errorName === 'TypeError' ? new TypeError(SECRET) : Object.assign(new Error(SECRET), { name: errorName });
+    const repo = await openDatabase(name, async () => { throw error; });
+    try { expect(diagnosticsOf(repo.getRecoveryStatus()).errorName).toBe(errorName); } finally { repo.close(); }
+  });
+
   it('is normal after a successful open', async () => {
     const repo = await openDatabase(dbName());
     try { expect(repo.getRecoveryStatus()).toEqual({ mode: 'normal' }); } finally { repo.close(); }
@@ -83,14 +90,18 @@ describe('getRecoveryStatus', () => {
   it('uses fixed text plus a sanitized error name for unknown failures, even for thrown non-errors', async () => {
     const name = dbName(); await seed(name, undefined);
     const odd = Object.assign(new Error(SECRET), { name: `Weird ${SECRET} name` });
-    for (const thrown of [odd, { message: SECRET }, SECRET, null]) {
+    // Identifier-shaped secrets in `name` must not pass either: only known class names are reported.
+    const identifier = Object.assign(new Error('x'), { name: 'sk_abc123' });
+    const fakeDom = new DOMException('x', 'sk_live_SECRET');
+    for (const thrown of [odd, identifier, fakeDom, { message: SECRET }, SECRET, null]) {
       const repo = await openDatabase(name, async () => { throw thrown; });
       try {
         const diagnostics = diagnosticsOf(repo.getRecoveryStatus());
         expect(diagnostics.code).toBe('migration-failed');
         expect(diagnostics.storedDataVersion).toBe(0);
-        expect(diagnostics.errorName).toMatch(/^[A-Za-z][A-Za-z0-9_]*$/);
+        expect(diagnostics.errorName).toBe('Error');
         expect(JSON.stringify(diagnostics)).not.toContain('SENTINEL');
+        expect(JSON.stringify(diagnostics)).not.toMatch(/sk_/);
       } finally { repo.close(); }
     }
   });

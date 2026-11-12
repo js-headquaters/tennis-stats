@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { expect, it, vi } from 'vitest';
-import type { TennisRepository } from '../../application/ports';
+import type { RecoveryStatus, TennisRepository } from '../../application/ports';
 import type { VoiceDraft } from '../../domain/model';
 import DraftReviewPage from './DraftReviewPage';
 import { dependencies } from '../../app/dependencies';
@@ -9,7 +9,7 @@ import { workRegistry } from '../../app/workGuard';
 
 const draft: VoiceDraft = { id:'d', matchId:'m', setId:'s', confirmationId:'c', dataVersion:1, recording:null, mimeType:null, transcripts:[{ text:'Original transcript', provider:'provider', model:'model', timestamp:'now' }], parsedDraft:{ version:1, games:[{ server:'player', result:'won', netErrors:null, wideErrors:0, longErrors:null, doubleFaults:null, failedReturns:null }], warnings:['Check score'] }, state:'ready', error:null, createdAt:'now', updatedAt:'now' };
 it('shows the saved draft without invoking providers or recording and confirms only on click', async () => {
-  const repository = { getDraft:vi.fn().mockResolvedValue(draft), getMatchBundle:vi.fn().mockResolvedValue({ match:{ id:'m' } }), close:vi.fn() } as unknown as TennisRepository;
+  const repository = { getDraft:vi.fn().mockResolvedValue(draft), getMatchBundle:vi.fn().mockResolvedValue({ match:{ id:'m' } }), close:vi.fn(), getRecoveryStatus:() => ({ mode:'normal' as const }) } as unknown as TennisRepository;
   const service = { retryDraft:vi.fn(), refineDraftWithAudio:vi.fn(), updateDraftGame:vi.fn(), confirmDraft:vi.fn().mockResolvedValue({ status:'confirmed', bundle:{ match:{ id:'m' } } }) };
   const recorder = vi.fn();
   render(<MemoryRouter initialEntries={['/voice/d']}><Routes><Route path="/voice/:draftId" element={<DraftReviewPage repository={repository} createService={() => service} createRecorder={recorder} />} /><Route path="/matches/:matchId/live" element={<p>Live match</p>} /></Routes></MemoryRouter>);
@@ -20,8 +20,8 @@ it('shows the saved draft without invoking providers or recording and confirms o
   expect(await screen.findByText('Live match')).toBeInTheDocument(); expect(service.confirmDraft).toHaveBeenCalledTimes(1);
 });
 
-function setup(initial: VoiceDraft = draft) {
-  const repository = { getDraft:vi.fn().mockResolvedValue(initial), getDraftConfirmation:vi.fn().mockResolvedValue(undefined), getMatchBundle:vi.fn().mockResolvedValue({ match:{ id:'m' } }), close:vi.fn() };
+function setup(initial: VoiceDraft = draft, getRecoveryStatus: () => RecoveryStatus = () => ({ mode:'normal' })) {
+  const repository = { getRecoveryStatus, getDraft:vi.fn().mockResolvedValue(initial), getDraftConfirmation:vi.fn().mockResolvedValue(undefined), getMatchBundle:vi.fn().mockResolvedValue({ match:{ id:'m' } }), close:vi.fn() };
   const service = { retryDraft:vi.fn().mockResolvedValue(draft), refineDraftWithAudio:vi.fn().mockResolvedValue(draft), updateDraftGame:vi.fn().mockResolvedValue(draft), confirmDraft:vi.fn().mockResolvedValue({ status:'alreadyConfirmed' as const, bundle:{ match:{ id:'m' } } }) };
   const recorder = { start:vi.fn().mockResolvedValue(undefined), stop:vi.fn().mockResolvedValue({ blob:new Blob(['audio']), mimeType:'audio/webm' }), cancel:vi.fn().mockResolvedValue(undefined) };
   const view = render(<MemoryRouter initialEntries={['/voice/d']}><Routes><Route path="/voice/:draftId" element={<DraftReviewPage repository={repository as unknown as TennisRepository} createService={() => service} createRecorder={() => recorder} />} /><Route path="/matches/:matchId/live" element={<p>Live match</p>} /></Routes></MemoryRouter>);
@@ -69,7 +69,7 @@ it('resolves a missing draft through durable confirmation', async () => {
 });
 it('closes owned repositories once on failure and retry', async () => {
   const failed = { getDraft:vi.fn().mockRejectedValue(new Error('secret')), close:vi.fn() };
-  const success = { getDraft:vi.fn().mockResolvedValue(draft), getMatchBundle:vi.fn().mockResolvedValue({ match:{ id:'m' } }), close:vi.fn() };
+  const success = { getDraft:vi.fn().mockResolvedValue(draft), getMatchBundle:vi.fn().mockResolvedValue({ match:{ id:'m' } }), close:vi.fn(), getRecoveryStatus:() => ({ mode:'normal' as const }) };
   const open = vi.spyOn(dependencies, 'openDatabase').mockResolvedValueOnce(failed as never).mockResolvedValueOnce(success as never);
   const view = render(<MemoryRouter initialEntries={['/voice/d']}><Routes><Route path="/voice/:draftId" element={<DraftReviewPage />} /></Routes></MemoryRouter>);
   expect(await screen.findByRole('alert')).toHaveTextContent(/could not load/i); expect(failed.close).toHaveBeenCalledTimes(1); fireEvent.click(screen.getByRole('button', { name:'Retry loading' }));
@@ -144,4 +144,23 @@ it('holds the update work guard while recording, processing, or with unsaved gam
   await waitFor(() => expect(service.refineDraftWithAudio).toHaveBeenCalledTimes(1)); expect(workRegistry.isBusy()).toBe(true);
   resolve(draft);
   await waitFor(() => expect(workRegistry.isBusy()).toBe(false));
+});
+const readOnly = (): RecoveryStatus => ({ mode:'readOnly', diagnostics:{ code:'newer-data-version', message:'m', failedStep:null, storedDataVersion:3, appDataVersion:2, appVersion:null, errorName:'Error' } });
+it.each(['ready', 'waiting-retry', 'confirming'] as const)('in read-only recovery mode keeps a %s draft viewable but disables every write control with a notice', async state => {
+  const { service, recorder } = setup({ ...draft, state }, readOnly);
+  expect(await screen.findByText('Original transcript')).toBeInTheDocument();
+  expect(screen.getByRole('note')).toHaveTextContent(/read-only recovery mode: recording, processing and confirming drafts are turned off/i);
+  const buttons = [screen.getByRole('button', { name:'Start recording' }), screen.getByRole('button', { name:'Confirm and add' })];
+  if (state === 'waiting-retry') buttons.push(screen.getByRole('button', { name:'Retry processing' }));
+  if (state === 'confirming') buttons.push(screen.getByRole('button', { name:'Resume confirmation' }));
+  for (const button of buttons) { expect(button).toBeDisabled(); fireEvent.click(button); }
+  expect(recorder.start).not.toHaveBeenCalled(); expect(service.retryDraft).not.toHaveBeenCalled(); expect(service.confirmDraft).not.toHaveBeenCalled(); expect(service.refineDraftWithAudio).not.toHaveBeenCalled();
+});
+it('in read-only recovery mode does not auto-process a recorded draft or show a generic error', async () => {
+  const { service } = setup({ ...draft, state:'recorded', parsedDraft:null, transcripts:[] }, readOnly);
+  expect(await screen.findByRole('button', { name:'Retry processing' })).toBeDisabled();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  expect(service.retryDraft).not.toHaveBeenCalled();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(screen.getByRole('note')).toHaveTextContent(/read-only recovery mode/i);
 });

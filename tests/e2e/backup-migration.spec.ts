@@ -299,6 +299,11 @@ const oldGames = [
 ];
 const oldTieBreaks = [{ id: 'done-tb', setId: 'done-s1', kind: 'standard', playerPoints: 7, opponentPoints: 3, netErrors: 0, wideErrors: null, longErrors: null, doubleFaults: 0, createdAt: 'old', updatedAt: 'old' }];
 const tennisStores = { opponents: [oldOpponent], matches: [oldDone, oldActive], sets: oldSets, games: oldGames, tieBreaks: oldTieBreaks };
+/**
+ * A current-shape draft persisted straight from the recorder: the review page would normally auto-process it. Its
+ * recording is null: with a seeded Blob the WebKit run failed in page.evaluate (seeding/reading it back).
+ */
+const richRecordedDraft = { id: 'rich-recorded', matchId: 'm', setId: 's1', confirmationId: 'c-rich', dataVersion: 1, recording: null, mimeType: null, transcripts: [], parsedDraft: null, state: 'recorded', error: null, createdAt: '2026-03-14T09:10:00.000Z', updatedAt: '2026-03-14T09:10:00.000Z' };
 const legacyDraft = { id: 'with-transcript', matchId: 'm', transcript: 'Won game, one net error', dataVersion: 1, createdAt: 't1', updatedAt: 't2' };
 
 function expectTennisUnchanged(stored: StoredSnapshot) {
@@ -366,7 +371,7 @@ test.describe('journey 12: upgrading a previous database version', () => {
       expect(await page.evaluate(() => (window as unknown as { copied: string }).copied)).toBe(fallback);
       return fallback;
     }
-    async function expectRecovery(page: Page, before: StoredSnapshot, expected: Record<string, unknown>) {
+    async function expectRecovery(page: Page, before: StoredSnapshot, expected: Record<string, unknown>, withRecordedDraft = false) {
       // The banner is on every route, including a direct navigation and a reload.
       for (const route of ['#/', '#/matches/m/live']) {
         await page.goto(route); await page.reload();
@@ -395,6 +400,20 @@ test.describe('journey 12: upgrading a previous database version', () => {
       await page.goto('#/matches/m/record');
       await expect(page.getByRole('button', { name: 'Start recording' })).toBeDisabled();
       await expect(page.getByRole('main').getByRole('note')).toContainText('recording is turned off');
+      if (withRecordedDraft) {
+        // A saved draft stays viewable, but nothing on the review page can write: no recording, processing or
+        // confirming, and the recorded draft is not auto-processed (no refused write, no generic error).
+        await page.getByRole('link', { name: /Resume draft/ }).click();
+        await expect(page).toHaveURL(/#\/voice\/rich-recorded$/);
+        await expect(page.getByRole('main').getByRole('note')).toContainText('Read-only recovery mode: recording, processing and confirming drafts are turned off');
+        for (const name of ['Start recording', 'Retry processing', 'Confirm and add']) await expect(page.getByRole('button', { name })).toBeDisabled();
+        await expect(page.getByRole('main').getByRole('alert')).toHaveCount(0);
+      }
+      // Match details: corrections are disabled and explained.
+      await page.goto('#/matches/done');
+      await expect(page.getByRole('heading', { name: 'Match against Alex' })).toBeVisible();
+      await expect(page.getByRole('main').getByRole('note')).toContainText('correcting games, tie-breaks, match details and comments is turned off');
+      for (const name of ['Save comments', 'Save match details', 'Edit game 1', 'Delete game 1', 'Edit tie-break']) await expect(page.getByRole('button', { name })).toBeDisabled();
 
       // The banner's export path works and the backup contains the preserved data.
       await banner(page).getByRole('link', { name: 'Export a backup in Settings' }).click();
@@ -413,11 +432,11 @@ test.describe('journey 12: upgrading a previous database version', () => {
     }
 
     test('a database written by a NEWER app version (data version above the current one) is not touched', async ({ page }) => {
-      await createLegacyDatabase(page, { dataVersion: CURRENT_DATA_VERSION + 1, stores: tennisStores });
+      await createLegacyDatabase(page, { dataVersion: CURRENT_DATA_VERSION + 1, stores: { ...tennisStores, drafts: [richRecordedDraft] } });
       await page.goto('#/');
       const before = await readDatabase(page);
       expect(before.dataVersion).toBe(CURRENT_DATA_VERSION + 1);
-      await expectRecovery(page, before, { code: 'newer-data-version', storedDataVersion: CURRENT_DATA_VERSION + 1, failedStep: null });
+      await expectRecovery(page, before, { code: 'newer-data-version', storedDataVersion: CURRENT_DATA_VERSION + 1, failedStep: null }, true);
     });
 
     test('a failing data migration step (the version-0 database keeps no version row) still offers export', async ({ page }) => {

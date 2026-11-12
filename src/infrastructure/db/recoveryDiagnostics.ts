@@ -13,11 +13,24 @@ export interface RecoveryContext {
 
 const STORAGE_ERRORS: ReadonlySet<string> = new Set(['QuotaExceededError']);
 
-/** Only identifier characters, so a crafted or data-bearing `name` can never leak through. */
+/**
+ * Error class names that may be reported. Anything else (including identifier-shaped strings that could carry a
+ * secret) is reported as `Error`.
+ */
+const KNOWN_ERROR_NAMES: ReadonlySet<string> = new Set([
+  'Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'DOMException',
+  // IndexedDB DOMException names and the Dexie error classes that wrap them.
+  'AbortError', 'ConstraintError', 'DataError', 'DataCloneError', 'InvalidAccessError', 'InvalidStateError', 'NotFoundError', 'QuotaExceededError',
+  'ReadOnlyError', 'TimeoutError', 'TransactionInactiveError', 'UnknownError', 'VersionError',
+  'DatabaseClosedError', 'OpenFailedError', 'MissingAPIError', 'InvalidTableError', 'NoSuchDatabaseError', 'PrematureCommitError', 'SchemaError', 'SubTransactionError', 'UpgradeError', 'BulkError', 'ModifyError',
+  // The app's own error classes.
+  'ReadOnlyRecoveryError', 'DraftStorageError', 'SafeProviderError', 'FileTransferError',
+]);
+
 function safeErrorName(error: unknown): string {
   try {
     const name = error instanceof Error || error instanceof DOMException ? error.name : '';
-    return /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(name) ? name : 'Error';
+    return KNOWN_ERROR_NAMES.has(name) ? name : 'Error';
   } catch { return 'Error'; }
 }
 

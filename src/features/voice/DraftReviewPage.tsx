@@ -6,6 +6,7 @@ import type { DraftGame, VoiceDraft } from '../../domain/model';
 import type { AudioRecorder } from '../../infrastructure/audio/mediaRecorder';
 import DraftGameCard from './DraftGameCard';
 import { useWorkHold } from '../../app/workGuard';
+import ReadOnlyNotice from '../../components/ReadOnlyNotice';
 
 type Service = ReturnType<typeof dependencies.createDraftService>;
 type Scheduler = { schedule(action: () => void, delay: number): () => void };
@@ -58,7 +59,9 @@ function ReviewContent({ draftId, repository, createService = dependencies.creat
     void load();
     return () => { cancelled = true; alive.current = false; generation.current++; timer.current?.(); abort.current?.abort(); void recorder.current?.cancel().catch(() => {}); recorder.current = null; close(); };
   }, [repository, createService, draftId, attempt, navigate]);
-  function begin(name: string) { if (lock.current || !loaded) return false; lock.current = true; setOperation(name); setError(''); return true; }
+  // Read-only recovery mode: every draft write is refused, so recording, processing and confirming are disabled.
+  const readOnly = loaded?.repo.getRecoveryStatus().mode === 'readOnly';
+  function begin(name: string) { if (lock.current || !loaded || readOnly) return false; lock.current = true; setOperation(name); setError(''); return true; }
   function finish() { lock.current = false; setOperation(''); }
   async function refresh() { if (!loaded) return; try { const draft = await loaded.repo.getDraft(draftId); if (alive.current && draft) setLoaded({ ...loaded, draft }); } catch { /* Keep the last known persisted draft. */ } }
   async function update(index: number, patch: Partial<DraftGame>) {
@@ -93,9 +96,10 @@ function ReviewContent({ draftId, repository, createService = dependencies.creat
   const autoProcessed = useRef(false);
   useEffect(() => {
     // A draft persisted straight from the recorder is processed here, so a reload or interruption leaves it retryable.
-    if (loaded?.draft.state !== 'recorded' || autoProcessed.current) return;
+    // In read-only recovery mode the processing write would be refused, so the draft is left as it is.
+    if (loaded?.draft.state !== 'recorded' || autoProcessed.current || readOnly) return;
     autoProcessed.current = true; void retry();
-  }, [loaded]);
+  }, [loaded, readOnly]);
   async function cancel() { const token = ++generation.current; timer.current?.(); timer.current = undefined; abort.current?.abort(); const current = recorder.current; recorder.current = null; try { await current?.cancel(); } catch { /* Safe cancellation. */ } if (alive.current && token === generation.current) { setError(''); finish(); } }
   const draft = loaded?.draft; const busy = !!operation;
   const state = operation === 'processing' ? 'Processing draft…' : operation === 'confirming' ? 'Confirming draft…' : operation === 'recording' ? 'Recording…' : operation === 'requesting' ? 'Requesting microphone permission…' : operation === 'stopping' ? 'Stopping recording…' : operation === 'saving' ? 'Saving game…' : draft?.state === 'waiting-retry' ? 'Waiting to retry.' : draft?.state === 'processing' ? 'Processing draft…' : draft?.state === 'confirming' ? 'Confirming draft…' : draft?.state === 'ready' ? 'Ready for review.' : 'Draft needs attention.';
@@ -105,17 +109,18 @@ function ReviewContent({ draftId, repository, createService = dependencies.creat
         <p role="status" aria-live="polite">{state}</p>
         {draft.error && <p>{messageFor(providerMessages, draft.error.code, 'Draft processing failed. Please try again.')}</p>}
         {error && <p role="alert">{error}</p>}
+        {readOnly && <ReadOnlyNotice disabled="recording, processing and confirming drafts are" />}
         <h2>Transcript history</h2>{draft.transcripts.length ? <ol>{draft.transcripts.map((item, index) => <li key={index}><p>{item.text}</p><p>Provider: {item.provider} · Model: {item.model}</p></li>)}</ol> : <p>No transcript yet.</p>}
         {!!draft.parsedDraft?.warnings.length && <><h2>Warnings</h2><ul>{draft.parsedDraft.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></>}
-        {draft.parsedDraft && <><h2>Games</h2>{draft.parsedDraft.games.map((game, index) => <DraftGameCard key={index} game={game} index={index} busy={busy || draft.state !== 'ready'} onUpdate={update} onDirtyChange={dirtyChanged} />)}</>}
+        {draft.parsedDraft && <><h2>Games</h2>{draft.parsedDraft.games.map((game, index) => <DraftGameCard key={index} game={game} index={index} busy={busy || readOnly || draft.state !== 'ready'} onUpdate={update} onDirtyChange={dirtyChanged} />)}</>}
         {!!dirty.size && <p>Save or discard your edits before continuing.</p>}
-        {(draft.state === 'waiting-retry' || draft.state === 'error' || draft.state === 'recorded' || draft.state === 'processing') && <button disabled={busy || !!dirty.size} onClick={() => void retry()}>Retry processing</button>}
-        {draft.state === 'confirming' && <button disabled={busy || !!dirty.size || !draft.parsedDraft?.games.length} onClick={() => void confirm()}>Resume confirmation</button>}
+        {(draft.state === 'waiting-retry' || draft.state === 'error' || draft.state === 'recorded' || draft.state === 'processing') && <button disabled={busy || readOnly || !!dirty.size} onClick={() => void retry()}>Retry processing</button>}
+        {draft.state === 'confirming' && <button disabled={busy || readOnly || !!dirty.size || !draft.parsedDraft?.games.length} onClick={() => void confirm()}>Resume confirmation</button>}
         <h2>Add or correct by voice</h2><p>Record up to two minutes. Recording stops automatically at the limit.</p>
-        {!['requesting', 'recording', 'stopping'].includes(operation) && <button disabled={busy || !!dirty.size} onClick={() => void start()}>Start recording</button>}
+        {!['requesting', 'recording', 'stopping'].includes(operation) && <button disabled={busy || readOnly || !!dirty.size} onClick={() => void start()}>Start recording</button>}
         {operation === 'recording' && <button onClick={() => void stop()}>Stop recording</button>}
         {['requesting', 'recording', 'stopping'].includes(operation) && <button onClick={() => void cancel()}>Cancel recording</button>}
-        <p><button disabled={busy || !!dirty.size || draft.state !== 'ready' || !draft.parsedDraft?.games.length} onClick={() => void confirm()}>Confirm and add</button></p>
+        <p><button disabled={busy || readOnly || !!dirty.size || draft.state !== 'ready' || !draft.parsedDraft?.games.length} onClick={() => void confirm()}>Confirm and add</button></p>
       </>}
     </>}
     <p><Link to={draft ? `/matches/${encodeURIComponent(draft.matchId)}/live` : '/matches'}>Manual entry / live match</Link> <Link to="/settings">Settings</Link></p>

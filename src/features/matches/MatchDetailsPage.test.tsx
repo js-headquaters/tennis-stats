@@ -213,7 +213,7 @@ it('closes an owned repository on unmount but not an injected one', async () => 
   const close = vi.spyOn(deps.repository, 'close');
   const injected = show(deps); await screen.findByText('Completed'); injected.unmount();
   expect(close).not.toHaveBeenCalled();
-  const owned = { getMatchBundle: vi.fn(async () => completed()), close: vi.fn() } as unknown as TennisRepository;
+  const owned = { getMatchBundle: vi.fn(async () => completed()), close: vi.fn(), getRecoveryStatus: () => ({ mode: 'normal' as const }) } as unknown as TennisRepository;
   mocks.openDatabase.mockResolvedValue(owned);
   const view = show(undefined); await screen.findByText('Completed'); view.unmount();
   expect(owned.close).toHaveBeenCalledTimes(1);
@@ -248,4 +248,18 @@ it('keeps 44px targets on the error, not-found and loaded states', async () => {
     show(deps); await screen.findByText('Completed');
     big(screen.getByRole('link', { name: 'Back to matches' })); big(screen.getByRole('button', { name: 'Save comments' })); big(within(set(1)).getByRole('button', { name: 'Edit game 1' }));
   } finally { style.remove(); }
+});
+
+it('in read-only recovery mode keeps the match viewable but disables every correction with a notice', async () => {
+  const name = `details-recovery-${crypto.randomUUID()}`;
+  const seededRepo = await openDatabase(name); await seededRepo.saveMatchBundle(completed()); seededRepo.close();
+  const repository = await openDatabase(name, async () => { throw new Error('migration failed'); }); repos.push(repository);
+  const save = vi.spyOn(repository, 'saveMatchBundle');
+  show({ repository, clock: { now: () => '2026-11-12T12:00:00.000Z' }, ids: { next: () => 'x' } });
+  expect(await screen.findByRole('heading', { name: 'Match against Alex' })).toBeInTheDocument();
+  expect(screen.getByRole('note')).toHaveTextContent(/read-only recovery mode: correcting games, tie-breaks, match details and comments is turned off/i);
+  const controls = [screen.getByRole('button', { name: 'Save comments' }), screen.getByRole('button', { name: 'Save match details' }), screen.getByRole('button', { name: 'Edit tie-break' }), ...screen.getAllByRole('button', { name: /^(Edit|Delete) game \d+$/ })];
+  expect(controls.length).toBeGreaterThan(4);
+  for (const control of controls) { expect(control).toBeDisabled(); fireEvent.click(control); }
+  expect(save).not.toHaveBeenCalled();
 });
