@@ -1,7 +1,7 @@
 import type { Clock, IdGenerator, TennisRepository } from './ports';
 import type { Game, MatchBundle, MatchFormat, Server, TennisSet, TieBreak } from '../domain/model';
 import { normalizeOpponentName, validateGame } from '../domain/validation';
-import { evaluateMatch, evaluateSet, inferServer } from '../domain/scoring';
+import { decidingStoredSet, evaluateMatch, evaluateSet, evaluateStoredMatch, evaluateStoredSet, inferServer } from '../domain/scoring';
 
 export interface MatchServiceDeps { repository: TennisRepository; clock: Clock; ids: IdGenerator }
 export interface StartMatchInput { opponentName?: string; opponentId?: string; playedAt: string; format?: MatchFormat; firstServer: Server }
@@ -47,15 +47,9 @@ export function nextGameServer(bundle: MatchBundle): Server {
 
 export type GameInput = Pick<Game, 'result' | 'netErrors' | 'wideErrors' | 'longErrors' | 'doubleFaults' | 'failedReturns'> & { server?: Server; score?: Game['score'] };
 
-function setEvaluation(bundle: MatchBundle, set: TennisSet) {
-  const evaluation = evaluateSet(bundle.games.filter(game => game.setId === set.id), bundle.tieBreaks.find(t => t.id === set.tieBreakId) ?? null);
-  return set.status === 'unfinished' ? { ...evaluation, kind: set.kind, completed: false, winner: null } : { ...evaluation, kind: set.kind };
-}
-
 function completeSet(bundle: MatchBundle, set: TennisSet, now: string, ids: IdGenerator) {
   set.status = 'completed'; set.updatedAt = now;
-  const evaluations = bundle.sets.filter(item => item.status !== 'unfinished').map(item => setEvaluation(bundle, item));
-  const match = evaluateMatch(bundle.match.format, evaluations);
+  const match = evaluateStoredMatch(bundle);
   if (match.complete) { bundle.match.status = 'completed'; return; }
   const kind = bundle.match.format === 'twoSetsSuperTiebreak' && match.playerSets === 1 && match.opponentSets === 1 ? 'decidingSuperTiebreak' : 'standard';
   bundle.sets.push({ id: ids.next(), matchId: bundle.match.id, ordinal: Math.max(...bundle.sets.map(item => item.ordinal)) + 1, kind, status: 'active', tieBreakId: null, createdAt: now, updatedAt: now });
@@ -77,7 +71,7 @@ export function prepareGames(found: MatchBundle, inputs: GameInput[], { clock, i
   for (const input of inputs) {
     const set = bundle.sets.find(item => item.status === 'active');
     if (!set || set.kind !== 'standard' || bundle.match.status !== 'active') throw new Error('No active standard set for game entry');
-    const score = setEvaluation(bundle, set);
+    const score = evaluateStoredSet(bundle, set);
     if (score.playerGames === 6 && score.opponentGames === 6) throw new Error('Complete the tie-break before adding games');
     const existing = bundle.games.filter(game => game.setId === set.id);
     const game: Game = { ...input, id: ids.next(), setId: set.id, ordinal: Math.max(0, ...existing.map(item => item.ordinal)) + 1, server: input.server ?? nextGameServer(bundle), score: input.score ?? null, createdAt: now, updatedAt: now };
@@ -85,7 +79,7 @@ export function prepareGames(found: MatchBundle, inputs: GameInput[], { clock, i
     const valid = validateGame(game);
     if (!valid.ok) throw new Error(valid.issues.map(issue => `${issue.field}: ${issue.message}`).join('; '));
     bundle.games.push(game);
-    if (setEvaluation(bundle, set).completed) completeSet(bundle, set, now, ids);
+    if (evaluateStoredSet(bundle, set).completed) completeSet(bundle, set, now, ids);
   }
   bundle.match.updatedAt = now;
   return bundle;
@@ -110,11 +104,11 @@ export async function completeTieBreak(input: TieBreakInput, { repository, clock
   if (bundle.match.status !== 'active' || set.status !== 'active' || set.tieBreakId || bundle.tieBreaks.some(t => t.setId === set.id)) throw new Error('Set is not active or already has a tie-break');
   const expected = set.kind === 'standard' ? 'standard' : 'super';
   if (input.kind !== expected) throw new Error(`Expected a ${expected} tie-break`);
-  const current = setEvaluation(bundle, set);
+  const current = evaluateStoredSet(bundle, set);
   if (expected === 'standard' && (current.playerGames !== 6 || current.opponentGames !== 6)) throw new Error('Standard tie-break requires six games all');
   if (expected === 'super' && bundle.games.some(game => game.setId === set.id)) throw new Error('Super tie-break set cannot have games');
   if (expected === 'super') {
-    const prior = bundle.sets.filter(item => item.ordinal < set.ordinal && item.status === 'completed').map(item => setEvaluation(bundle, item));
+    const prior = bundle.sets.filter(item => item.ordinal < set.ordinal && item.status === 'completed').map(item => evaluateStoredSet(bundle, item));
     const match = evaluateMatch(bundle.match.format, prior);
     if (bundle.match.format !== 'twoSetsSuperTiebreak' || match.complete || match.playerSets !== 1 || match.opponentSets !== 1) throw new Error('Super tie-break requires split completed standard sets');
   }
@@ -189,7 +183,7 @@ function correctionConflicts(before: MatchBundle, after: MatchBundle, corrected:
     }
   }
   for (const set of before.sets) {
-    const prior = setEvaluation(before, set), next = setEvaluation(after, set);
+    const prior = evaluateStoredSet(before, set), next = evaluateStoredSet(after, set);
     const outcomeChanged = prior.completed !== next.completed || prior.winner !== next.winner;
     if (set.status !== 'unfinished' && outcomeChanged) conflicts.push({ type: 'setOutcomeInvalidated', setId: set.id, message: `Set ${set.ordinal} outcome changes` });
     if (set.status === 'completed' && prior.completed && (prior.completed !== next.completed || prior.winner !== next.winner)) {
@@ -222,8 +216,7 @@ function correctionConflicts(before: MatchBundle, after: MatchBundle, corrected:
     }
     if (tie?.kind === 'standard' && !eligible(games)) conflicts.push({ type: 'structureInvalidated', setId: set.id, tieBreakId: tie.id, message: `Set ${set.ordinal} no longer qualifies for tie-break ${tie.id}` });
   }
-  const evaluate = (bundle: MatchBundle) => evaluateMatch(bundle.match.format, bundle.sets.filter(s => s.status !== 'unfinished').map(s => setEvaluation(bundle, s)));
-  const oldMatch = evaluate(before), newMatch = evaluate(after);
+  const oldMatch = evaluateStoredMatch(before), newMatch = evaluateStoredMatch(after);
   if (oldMatch.complete !== newMatch.complete || oldMatch.winner !== newMatch.winner) conflicts.push({ type: 'matchOutcomeInvalidated', message: 'Match outcome or completion changes' });
   return conflicts;
 }
@@ -256,6 +249,22 @@ export async function deleteGame(gameId: string, { repository, clock }: MatchSer
   return { bundle, conflicts };
 }
 
+/** Records the new format can no longer hold: anything after the set that already decides the match, and super tie-break sets outside the super tie-break format. */
+function formatStructureConflicts(bundle: MatchBundle): GameConflict[] {
+  const conflicts: GameConflict[] = [];
+  const flagged = new Set<string>();
+  const flag = (set: TennisSet, reason: string) => {
+    if (flagged.has(set.id)) return; flagged.add(set.id);
+    conflicts.push({ type: 'structureInvalidated', setId: set.id, message: `Set ${set.ordinal} ${reason}` });
+    for (const tie of bundle.tieBreaks.filter(item => item.setId === set.id)) conflicts.push({ type: 'structureInvalidated', setId: set.id, tieBreakId: tie.id, message: `Tie-break ${tie.id} in set ${set.ordinal} ${reason}` });
+    for (const game of bundle.games.filter(item => item.setId === set.id)) conflicts.push({ type: 'structureInvalidated', setId: set.id, gameId: game.id, message: `Game ${game.id} in set ${set.ordinal} ${reason}` });
+  };
+  const deciding = decidingStoredSet(bundle);
+  if (deciding) for (const set of bundle.sets.filter(item => item.ordinal > deciding.ordinal).sort((a, b) => a.ordinal - b.ordinal)) flag(set, `comes after set ${deciding.ordinal} already decides the match under the new format`);
+  if (bundle.match.format !== 'twoSetsSuperTiebreak') for (const set of bundle.sets.filter(item => item.kind === 'decidingSuperTiebreak')) flag(set, 'is a super tie-break set that does not fit the new format');
+  return conflicts;
+}
+
 export type CorrectionResult = { bundle: MatchBundle; conflicts: GameConflict[] };
 export interface MatchDetailsPatch { opponentName?: string; playedAt?: string; format?: MatchFormat }
 
@@ -283,9 +292,7 @@ export async function updateMatchDetails(id: string, patch: MatchDetailsPatch, {
     }
   }
   const conflicts = correctionConflicts(before, bundle, null);
-  if (bundle.match.format !== 'twoSetsSuperTiebreak') {
-    for (const set of bundle.sets.filter(item => item.kind === 'decidingSuperTiebreak')) conflicts.push({ type: 'structureInvalidated', setId: set.id, message: `Super tie-break set ${set.ordinal} does not fit the new format` });
-  }
+  if (bundle.match.format !== before.match.format) conflicts.push(...formatStructureConflicts(bundle));
   if (conflicts.length && !confirmed) return { bundle: before, conflicts };
   bundle.match.updatedAt = now;
   await repository.saveMatchBundle(bundle);

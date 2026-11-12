@@ -1,4 +1,7 @@
+/// <reference types="node" />
 import 'fake-indexeddb/auto';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -214,4 +217,35 @@ it('closes an owned repository on unmount but not an injected one', async () => 
   mocks.openDatabase.mockResolvedValue(owned);
   const view = show(undefined); await screen.findByText('Completed'); view.unmount();
   expect(owned.close).toHaveBeenCalledTimes(1);
+});
+
+it('saves only changed metadata, leaving a precise playedAt byte-identical', async () => {
+  const precise = completed(); precise.match.playedAt = '2026-11-10T18:30:42.123Z';
+  const deps = await seeded(precise); show(deps);
+  await screen.findByText('Completed');
+  fireEvent.change(screen.getByLabelText('Opponent'), { target: { value: 'Casey' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save match details' }));
+  expect(await screen.findByRole('heading', { level: 1, name: 'Match against Casey' })).toBeInTheDocument();
+  const after = await stored(deps);
+  expect(after.match.playedAt).toBe('2026-11-10T18:30:42.123Z'); expect(after.match.format).toBe('bestOfThree');
+});
+
+it('keeps 44px targets on the error, not-found and loaded states', async () => {
+  const style = document.createElement('style'); style.textContent = readFileSync(resolve(process.cwd(), 'src/styles/global.css'), 'utf8'); document.head.append(style);
+  try {
+    const big = (element: HTMLElement) => { expect(parseFloat(getComputedStyle(element).minHeight)).toBeGreaterThanOrEqual(44); expect(parseFloat(getComputedStyle(element).minWidth)).toBeGreaterThanOrEqual(44); };
+    const deps = await seeded(completed());
+    const real = deps.repository.getMatchBundle.bind(deps.repository);
+    vi.spyOn(deps.repository, 'getMatchBundle').mockRejectedValueOnce(new Error('offline')).mockImplementation(real);
+    const failing = show(deps);
+    await screen.findByRole('alert');
+    big(screen.getByRole('button', { name: 'Retry' })); big(screen.getByRole('link', { name: 'Back to matches' }));
+    failing.unmount();
+    const missing = show(deps, 'nope');
+    await screen.findByRole('heading', { name: 'Match not found' });
+    big(screen.getByRole('link', { name: 'Back to matches' }));
+    missing.unmount();
+    show(deps); await screen.findByText('Completed');
+    big(screen.getByRole('link', { name: 'Back to matches' })); big(screen.getByRole('button', { name: 'Save comments' })); big(within(set(1)).getByRole('button', { name: 'Edit game 1' }));
+  } finally { style.remove(); }
 });

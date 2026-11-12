@@ -61,6 +61,7 @@
 .match-filters input, .match-filters select { display: block; width: 100%; max-width: 30rem; }
 .match-history ul { list-style: none; padding: 0; margin: 0; }
 .match-history li { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .75rem; padding: .5rem 0; border-bottom: 1px solid var(--border); }
+.match-details button, .match-details .touch-link { min-height: 44px; min-width: 44px; padding: .5rem; font: inherit; }
 .match-details .touch-link { display: inline-flex; align-items: center; padding: .5rem; color: var(--text); background: white; border: 1px solid var(--border); border-radius: .5rem; font-weight: 700; }
 .match-details .match-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: .5rem; margin: 1rem 0; }
 .match-details .match-facts dt { font-size: .875rem; }

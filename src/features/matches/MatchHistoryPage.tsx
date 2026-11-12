@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { dependencies } from '../../app/dependencies';
 import type { MatchFilter, TennisRepository } from '../../application/ports';
 import type { Match, MatchBundle, MatchFormat, MatchStatus, Opponent } from '../../domain/model';
-import { evaluateMatch, evaluateSet } from '../../domain/scoring';
+import { evaluateStoredMatch, evaluateStoredSet } from '../../domain/scoring';
 import { formatDay } from '../dashboard/periods';
 import MatchFilters, { NO_FILTERS, type MatchFilterValue } from './MatchFilters';
 
@@ -45,12 +45,12 @@ async function load(repository: TennisRepository, value: MatchFilterValue): Prom
 
 function summarise(bundle: MatchBundle) {
   const sets = [...bundle.sets].sort((a, b) => a.ordinal - b.ordinal).map(set => {
-    const tieBreak = bundle.tieBreaks.find(item => item.setId === set.id) ?? null;
-    const evaluation = evaluateSet(bundle.games.filter(game => game.setId === set.id), tieBreak);
+    const tieBreak = bundle.tieBreaks.find(item => item.id === set.tieBreakId) ?? null;
+    const evaluation = evaluateStoredSet(bundle, set);
     const score = evaluation.kind === 'decidingSuperTiebreak' && tieBreak ? `${tieBreak.playerPoints}–${tieBreak.opponentPoints}` : `${evaluation.playerGames}–${evaluation.opponentGames}`;
     return { evaluation, score, hasData: evaluation.kind === 'decidingSuperTiebreak' ? tieBreak !== null : bundle.games.some(game => game.setId === set.id) };
   });
-  const match = evaluateMatch(bundle.match.format, sets.map(set => set.evaluation));
+  const match = evaluateStoredMatch(bundle);
   const verdict = match.winner === 'player' ? 'Won' : match.winner === 'opponent' ? 'Lost' : 'No result';
   const scores = sets.filter(set => set.hasData).map(set => set.score).join(', ');
   return { result: `${verdict}, sets ${match.playerSets}–${match.opponentSets}`, scores: scores || 'No games recorded' };

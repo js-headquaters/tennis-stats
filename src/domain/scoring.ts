@@ -1,4 +1,4 @@
-import type { Game, MatchFormat, Server, TieBreak } from './model';
+import type { Game, MatchBundle, MatchFormat, Server, TennisSet, TieBreak } from './model';
 
 export interface SetEvaluation {
   kind: 'standard' | 'decidingSuperTiebreak';
@@ -101,4 +101,29 @@ export function findCorrectionConflicts(before: Game[], after: Game[]): Correcti
     conflicts.push({ type: 'setOutcomeInvalidated', beforeWinner: beforeSet.winner, afterWinner: afterSet.winner });
   }
   return conflicts;
+}
+
+/** The single evaluator for a STORED set: its own tie-break (by `tieBreakId`), its stored kind, and no winner while unfinished. */
+export function evaluateStoredSet(bundle: MatchBundle, set: TennisSet): SetEvaluation {
+  const evaluation = evaluateSet(bundle.games.filter(game => game.setId === set.id), bundle.tieBreaks.find(t => t.id === set.tieBreakId) ?? null);
+  return set.status === 'unfinished' ? { ...evaluation, kind: set.kind, completed: false, winner: null } : { ...evaluation, kind: set.kind };
+}
+
+/** Stored sets that count toward the match result (unfinished sets excluded), in ordinal order. */
+function countedSets(bundle: MatchBundle) {
+  return [...bundle.sets].sort((a, b) => a.ordinal - b.ordinal).filter(set => set.status !== 'unfinished');
+}
+
+/** The single evaluator for a STORED match under `format` (defaults to the stored format). */
+export function evaluateStoredMatch(bundle: MatchBundle, format: MatchFormat = bundle.match.format): MatchEvaluation {
+  return evaluateMatch(format, countedSets(bundle).map(set => evaluateStoredSet(bundle, set)));
+}
+
+/** The first counted set at which the match is already decided under `format`, or null when it never is. */
+export function decidingStoredSet(bundle: MatchBundle, format: MatchFormat = bundle.match.format): TennisSet | null {
+  const sets = countedSets(bundle);
+  for (let index = 0; index < sets.length; index++) {
+    if (evaluateMatch(format, sets.slice(0, index + 1).map(set => evaluateStoredSet(bundle, set))).complete) return sets[index];
+  }
+  return null;
 }

@@ -502,3 +502,41 @@ describe('post-match metadata and tie-break corrections', () => {
     await expect(updateTieBreak('missing', { playerPoints:7, opponentPoints:5, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null }, deps)).rejects.toThrow(/not found/);
   });
 });
+
+describe('format change structure revalidation', () => {
+  const metrics = { netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns:null };
+  const six = (result: 'won' | 'lost') => Array.from({ length:6 }, () => ({ ...metrics, result }));
+  async function bestOfThree(deps: Awaited<ReturnType<typeof setup>>, pattern: Array<'won' | 'lost'>) {
+    const start = await startMatch({ ...input, format:'bestOfThree' }, deps);
+    const done = await addGames(start.match.id, pattern.flatMap(six), deps);
+    expect(done.match.status).toBe('completed'); expect(done.sets).toHaveLength(3);
+    return done;
+  }
+  it.each([
+    ['W-L-W', ['won', 'lost', 'won'] as const],
+    ['L-W-W', ['lost', 'won', 'won'] as const],
+  ])('%s best-of-three changed to one set flags every record after the set that decides it', async (_, pattern) => {
+    const deps = await setup(); const done = await bestOfThree(deps, [...pattern]);
+    const save = vi.spyOn(deps.repository, 'saveMatchBundle');
+    const preview = await updateMatchDetails(done.match.id, { format:'oneSet' }, deps);
+    expect(save).not.toHaveBeenCalled(); expect(preview.bundle.match.format).toBe('bestOfThree');
+    const later = done.sets.filter(set => set.ordinal > 1);
+    for (const set of later) {
+      expect(preview.conflicts).toEqual(expect.arrayContaining([expect.objectContaining({ type:'structureInvalidated', setId:set.id })]));
+      for (const game of done.games.filter(g => g.setId === set.id)) expect(preview.conflicts).toEqual(expect.arrayContaining([expect.objectContaining({ type:'structureInvalidated', setId:set.id, gameId:game.id })]));
+    }
+    expect(preview.conflicts.filter(c => c.setId === done.sets[0].id)).toEqual([]);
+    const applied = await updateMatchDetails(done.match.id, { format:'oneSet' }, deps, true);
+    expect(applied.bundle.match.format).toBe('oneSet'); expect(applied.bundle.match.status).toBe('completed');
+  });
+  it('flags later tie-breaks and stays quiet when the new format still needs every set', async () => {
+    const deps = await setup(); const start = await startMatch({ ...input, format:'bestOfThree' }, deps);
+    await addGames(start.match.id, six('won'), deps);
+    const tied = await addGames(start.match.id, Array.from({ length:12 }, (_, i) => ({ ...metrics, result:(i % 2 ? 'lost' : 'won') as 'won' | 'lost' })), deps);
+    const done = await completeTieBreak({ setId:tied.sets[1].id, kind:'standard', playerPoints:7, opponentPoints:2, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null }, deps);
+    expect(done.match.status).toBe('completed');
+    const preview = await updateMatchDetails(done.match.id, { format:'oneSet' }, deps);
+    expect(preview.conflicts).toEqual(expect.arrayContaining([expect.objectContaining({ type:'structureInvalidated', setId:done.sets[1].id, tieBreakId:done.tieBreaks[0].id })]));
+    expect((await updateMatchDetails(done.match.id, { format:'openPractice' }, deps)).conflicts.filter(c => c.type === 'structureInvalidated')).toEqual([]);
+  });
+});

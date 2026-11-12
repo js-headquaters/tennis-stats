@@ -1,15 +1,9 @@
 import type { Game, MatchBundle, SetStatus, TennisSet, TieBreak } from '../../domain/model';
-import { evaluateSet, type SetEvaluation } from '../../domain/scoring';
+import { evaluateStoredSet, type SetEvaluation } from '../../domain/scoring';
 import GameCard, { tieBreakMetrics } from './GameCard';
 
 const SET_STATUS: Record<SetStatus, string> = { completed: 'Set completed', unfinished: 'Set unfinished', active: 'Set in progress' };
 const verdict = (winner: SetEvaluation['winner']) => winner === 'player' ? 'Won' : winner === 'opponent' ? 'Lost' : 'No result';
-
-/** Mirrors the service: an unfinished set never has a winner. */
-export function evaluateStoredSet(bundle: MatchBundle, set: TennisSet): SetEvaluation {
-  const evaluation = evaluateSet(bundle.games.filter(game => game.setId === set.id), bundle.tieBreaks.find(t => t.id === set.tieBreakId) ?? null);
-  return set.status === 'unfinished' ? { ...evaluation, kind: set.kind, completed: false, winner: null } : { ...evaluation, kind: set.kind };
-}
 
 function TieBreakSummary({ tieBreak, disabled, onEdit }: { tieBreak: TieBreak; disabled: boolean; onEdit: () => void }) {
   const title = tieBreak.kind === 'super' ? 'Super tie-break' : 'Standard tie-break';

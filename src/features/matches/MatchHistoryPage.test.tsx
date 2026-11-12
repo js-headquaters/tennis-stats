@@ -1,17 +1,19 @@
 /// <reference types="node" />
 import 'fake-indexeddb/auto';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { TennisRepository } from '../../application/ports';
 import type { Game, MatchBundle, MatchFormat, MatchStatus } from '../../domain/model';
 import { openDatabase } from '../../infrastructure/db/database';
+import { updateGame } from '../../application/matchService';
+import MatchDetailsPage from './MatchDetailsPage';
 import MatchHistoryPage from './MatchHistoryPage';
 
 const mocks = vi.hoisted(() => ({ openDatabase: vi.fn() }));
-vi.mock('../../app/dependencies', () => ({ dependencies: { openDatabase: mocks.openDatabase, clock: { now: () => new Date(2026, 10, 12, 12).toISOString() } } }));
+vi.mock('../../app/dependencies', () => ({ dependencies: { openDatabase: mocks.openDatabase, clock: { now: () => new Date(2026, 10, 12, 12).toISOString() }, ids: { next: () => 'id' } } }));
 
 let n = 0;
 const repos: TennisRepository[] = [];
@@ -159,4 +161,33 @@ it('uses 44px targets for filters, retry and match links', async () => {
   for (const element of [screen.getByLabelText('Opponent'), screen.getByLabelText('From date'), screen.getByLabelText('To date'), within(rows()[0]).getByRole('link')]) {
     expect(parseFloat(getComputedStyle(element).minHeight)).toBeGreaterThanOrEqual(44);
   }
+});
+
+const fixedDeps = (repository: TennisRepository) => ({ repository, clock: { now: () => '2026-11-12T12:00:00.000Z' }, ids: { next: () => `id-${++n}` } });
+async function detailsResult(repository: TennisRepository, id: string) {
+  const view = render(<MemoryRouter initialEntries={[`/matches/${id}`]}><Routes><Route path="/matches/:matchId" element={<MatchDetailsPage deps={fixedDeps(repository)} />} /></Routes></MemoryRouter>);
+  await screen.findByRole('heading', { level: 1, name: /Match against/ });
+  const text = screen.getByText(/^(Won|Lost|No result), sets/, { selector: 'dd' }).textContent; view.unmount(); return text;
+}
+async function historyResult(repository: TennisRepository, opponent: string) {
+  const view = render(<MemoryRouter><MatchHistoryPage repository={repository} /></MemoryRouter>);
+  await screen.findByRole('link', { name: opponent });
+  const row = rows().find(item => item.textContent?.includes(opponent))!;
+  await waitFor(() => expect(row).toHaveTextContent(/sets \d/));
+  const text = /(Won|Lost|No result), sets \d–\d/.exec(row.textContent ?? '')![0]; view.unmount(); return text;
+}
+
+it('ignores an early-ended set in a two-sets-plus-super-tie-break result, like the details page', async () => {
+  const repository = await seeded([bundle('early', 'Fran', new Date(2026, 10, 11, 10), 'completed', 'twoSetsSuperTiebreak', [[2, 1], [6, 0], [6, 1]])]);
+  expect(await historyResult(repository, 'Fran')).toBe('Won, sets 2–0');
+  expect(await detailsResult(repository, 'early')).toBe('Won, sets 2–0');
+});
+
+it('agrees with the details page after an unfinished set\'s games are corrected into a decisive score', async () => {
+  const repository = await seeded([bundle('fix', 'Gale', new Date(2026, 10, 11, 10), 'completed', 'bestOfThree', [[5, 1], [6, 0], [6, 0]])]);
+  const corrected = await updateGame('fix-s1-g5', { result: 'won' }, fixedDeps(repository));
+  expect(corrected.conflicts).toEqual([]);
+  expect(corrected.bundle.sets[0].status).toBe('unfinished');
+  expect(await historyResult(repository, 'Gale')).toBe('Won, sets 2–0');
+  expect(await detailsResult(repository, 'fix')).toBe('Won, sets 2–0');
 });

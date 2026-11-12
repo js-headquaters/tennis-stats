@@ -3,14 +3,14 @@ import { Link, useParams } from 'react-router-dom';
 import { dependencies } from '../../app/dependencies';
 import { deleteGame, updateComments, updateGame, updateMatchDetails, updateTieBreak, type CorrectionResult, type GameConflict, type MatchDetailsPatch, type MatchServiceDeps } from '../../application/matchService';
 import type { Game, MatchBundle, TieBreak } from '../../domain/model';
-import { evaluateMatch } from '../../domain/scoring';
+import { evaluateStoredMatch } from '../../domain/scoring';
 import { formatDay } from '../dashboard/periods';
 import CorrectionConfirmation from './CorrectionConfirmation';
 import GameForm from './GameForm';
 import MatchAverages from './MatchAverages';
 import { COMPLETION_LABEL, FORMAT_LABEL } from './MatchHistoryPage';
 import MatchMetadataForm from './MatchMetadataForm';
-import MatchSetDetails, { evaluateStoredSet } from './MatchSetDetails';
+import MatchSetDetails from './MatchSetDetails';
 import TieBreakForm from './TieBreakForm';
 
 type Correction = { conflicts: GameConflict[]; run: (confirmed: boolean) => Promise<CorrectionResult> };
@@ -23,7 +23,7 @@ function when(playedAt: string) {
 }
 
 function result(bundle: MatchBundle) {
-  const match = evaluateMatch(bundle.match.format, [...bundle.sets].sort((a, b) => a.ordinal - b.ordinal).filter(set => set.status !== 'unfinished').map(set => evaluateStoredSet(bundle, set)));
+  const match = evaluateStoredMatch(bundle);
   return `${match.winner === 'player' ? 'Won' : match.winner === 'opponent' ? 'Lost' : 'No result'}, sets ${match.playerSets}–${match.opponentSets}`;
 }
 
