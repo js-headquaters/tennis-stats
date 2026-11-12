@@ -48,6 +48,14 @@ export class IndexedDbTennisRepository implements TennisRepository {
       await this.db.sets.bulkAdd(sets); await this.db.games.bulkAdd(games); await this.db.tieBreaks.bulkAdd(tieBreaks);
     });
   }
+  async abandonMatch(id: string, updatedAt: string) {
+    this.writable();
+    await this.db.transaction('rw', this.db.matches, async () => {
+      const match = await this.db.matches.get(id);
+      if (!match || match.status !== 'active') throw new Error('Match is not active');
+      await this.db.matches.put({ ...match, status: 'abandoned', updatedAt });
+    });
+  }
   async deleteMatch(id: string) { this.writable(); await this.db.transaction('rw', this.db.matches, this.db.sets, this.db.games, this.db.tieBreaks, this.db.drafts, async () => { await this.removeChildren(id); await this.db.drafts.where('matchId').equals(id).delete(); await this.db.matches.delete(id); }); }
   async saveDraft(draft: VoiceDraft) {
     this.writable();

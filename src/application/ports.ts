@@ -9,6 +9,7 @@ export interface TennisRepository {
   getMatchBundle(id: string): Promise<MatchBundle | undefined>;
   listMatches(filter?: MatchFilter): Promise<Match[]>;
   saveMatchBundle(bundle: MatchBundle): Promise<void>;
+  abandonMatch(id: string, updatedAt: string): Promise<void>;
   deleteMatch(id: string): Promise<void>;
   saveDraft(draft: VoiceDraft): Promise<void>;
   getDraft(id: string): Promise<VoiceDraft | undefined>;

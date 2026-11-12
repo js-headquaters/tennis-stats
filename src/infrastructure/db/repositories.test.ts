@@ -41,6 +41,18 @@ describe('IndexedDB repository', () => {
     expect(await repo.listMatches()).toHaveLength(1);
     expect(await repo.listOpponents()).toHaveLength(1);
   });
+  it('abandons only an active match without replacing its children', async () => {
+    const repo = await setup(); const original = bundle('m');
+    await repo.saveMatchBundle(original);
+    await repo.abandonMatch('m', '2026-03-01');
+    const saved = await repo.getMatchBundle('m');
+    expect(saved?.match).toMatchObject({ status: 'abandoned', updatedAt: '2026-03-01' });
+    expect(saved?.sets).toHaveLength(2);
+    expect(saved?.games).toHaveLength(2);
+    expect(saved?.tieBreaks).toHaveLength(1);
+    await expect(repo.abandonMatch('m', '2026-03-02')).rejects.toThrow(/not active/i);
+    expect((await repo.getMatchBundle('m'))?.match.updatedAt).toBe('2026-03-01');
+  });
   it('does not delegate active reads across a deletion gap', async () => {
     const repo = await setup(); await repo.saveMatchBundle(bundle('m'));
     const originalGetBundle = repo.getMatchBundle.bind(repo);
