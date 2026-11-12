@@ -90,3 +90,35 @@ it('disables editing and duplicate actions until a connection test settles', asy
   expect(section.getByText('Connection successful.')).toBeInTheDocument();
   expect(section.getByLabelText('Model')).toBeEnabled();
 });
+
+it.each([
+  ['Transcription', 'Statistics parser', 'transcription', 'parser'],
+  ['Statistics parser', 'Transcription', 'parser', 'transcription'],
+] as const)('locks both sections while %s is testing', async (first, second, firstKind, secondKind) => {
+  localStorage.clear();
+  let resolve!: () => void; const pending = new Promise<void>(done => { resolve = done; });
+  const testConnection = vi.fn().mockReturnValueOnce(pending).mockResolvedValueOnce(undefined);
+  render(<SettingsPage store={createLocalSettings(localStorage)} testConnection={testConnection} />);
+  expect(testConnection).not.toHaveBeenCalled();
+  const firstSection = within(screen.getByRole('group', { name: first }));
+  const secondSection = within(screen.getByRole('group', { name: second }));
+  fireEvent.click(secondSection.getByRole('button', { name: 'Save' }));
+  expect(secondSection.getByRole('status')).toHaveTextContent('Saved.');
+  fireEvent.click(firstSection.getByRole('button', { name: 'Test connection' }));
+  expect(testConnection).toHaveBeenCalledTimes(1);
+  expect(testConnection.mock.calls[0][0]).toBe(firstKind);
+  for (const section of [firstSection, secondSection]) {
+    for (const control of [section.getByLabelText('Provider'), section.getByLabelText('Model'), section.getByLabelText('Endpoint (optional)'), section.getByLabelText('API key'), section.getByRole('button', { name: 'Save' }), section.getByRole('button', { name: 'Clear key' }), section.getByRole('button', { name: 'Test connection' })]) expect(control).toBeDisabled();
+  }
+  fireEvent.click(secondSection.getByRole('button', { name: 'Test connection' }));
+  expect(testConnection).toHaveBeenCalledTimes(1);
+  await act(async () => resolve());
+  expect(firstSection.getByRole('status')).toHaveTextContent('Connection successful.');
+  expect(secondSection.getByRole('status')).toHaveTextContent('Saved.');
+  expect(secondSection.getByRole('button', { name: 'Test connection' })).toBeEnabled();
+  fireEvent.click(secondSection.getByRole('button', { name: 'Test connection' }));
+  await waitFor(() => expect(testConnection).toHaveBeenCalledTimes(2));
+  expect(testConnection.mock.calls[1][0]).toBe(secondKind);
+  await secondSection.findByText('Connection successful.');
+  expect(firstSection.getByRole('status')).toHaveTextContent('Connection successful.');
+});

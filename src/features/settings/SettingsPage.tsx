@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react';
 import type { AiKind, AiSettingsStore, ParserSettings, TranscriptionSettings } from '../../application/ports';
 import { createLocalSettings } from '../../infrastructure/settings/localSettings';
 import { createOpenAiTranscription } from '../../infrastructure/ai/openAiTranscription';
@@ -18,8 +19,11 @@ async function defaultTest(kind: AiKind, settings: Settings) {
   else await (settings.provider === 'anthropic' ? createAnthropicParser(settings) : createOpenAiParser(settings)).parse({ transcript: '' }, signal);
 }
 export default function SettingsPage({ store = createLocalSettings(localStorage), testConnection = defaultTest }: { store?: AiSettingsStore; testConnection?: (kind: AiKind, settings: Settings) => Promise<void> }) {
+  const owner = useRef<AiKind | null>(null); const [pending, setPending] = useState(false);
+  const acquire = (kind: AiKind) => { if (owner.current !== null) return false; owner.current = kind; setPending(true); return true; };
+  const release = (kind: AiKind) => { if (owner.current === kind) { owner.current = null; setPending(false); } };
   return <><h1>Settings</h1><p>Client-side browser-held API keys are exposed to risk. Use restricted, expiring keys with hard spend limits.</p>
-    <AiSettingsSection title="Transcription" kind="transcription" initial={store.getTranscription()} save={value => store.saveTranscription(value as TranscriptionSettings)} clear={() => store.clear('transcription')} testConnection={testConnection} />
-    <AiSettingsSection title="Statistics parser" kind="parser" initial={store.getParser()} save={value => store.saveParser(value)} clear={() => store.clear('parser')} testConnection={testConnection} />
+    <AiSettingsSection title="Transcription" kind="transcription" initial={store.getTranscription()} save={value => store.saveTranscription(value as TranscriptionSettings)} clear={() => store.clear('transcription')} testConnection={testConnection} pending={pending} acquire={acquire} release={release} />
+    <AiSettingsSection title="Statistics parser" kind="parser" initial={store.getParser()} save={value => store.saveParser(value)} clear={() => store.clear('parser')} testConnection={testConnection} pending={pending} acquire={acquire} release={release} />
   </>;
 }

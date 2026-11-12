@@ -1,11 +1,11 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import type { AiKind, ParserSettings, TranscriptionSettings } from '../../application/ports';
 import { redactProviderError } from '../../infrastructure/ai/common';
 
 type Settings = ParserSettings | TranscriptionSettings;
-export function AiSettingsSection({ title, kind, initial, save, clear, testConnection }: { title: string; kind: AiKind; initial: Settings; save: (value: Settings) => void; clear: () => void; testConnection: (kind: AiKind, settings: Settings) => Promise<void> }) {
+export function AiSettingsSection({ title, kind, initial, save, clear, testConnection, pending, acquire, release }: { title: string; kind: AiKind; initial: Settings; save: (value: Settings) => void; clear: () => void; testConnection: (kind: AiKind, settings: Settings) => Promise<void>; pending: boolean; acquire: (kind: AiKind) => boolean; release: (kind: AiKind) => void }) {
   const [settings, setSettings] = useState(initial); const [key, setKey] = useState(''); const [message, setMessage] = useState(''); const [error, setError] = useState(false);
-  const [switched, setSwitched] = useState(false); const [pending, setPending] = useState(false); const inFlight = useRef(false);
+  const [switched, setSwitched] = useState(false);
   const current = () => ({ ...settings, apiKey: key || settings.apiKey });
   const changed = () => setMessage('');
   return <fieldset disabled={pending}><legend>{title}</legend>
@@ -16,7 +16,7 @@ export function AiSettingsSection({ title, kind, initial, save, clear, testConne
     <label>API key <input type="password" autoComplete="off" value={key} placeholder={settings.apiKey ? 'Key saved' : ''} onChange={event => { setKey(event.target.value); changed(); }} /></label>
     <button type="button" onClick={() => { if (switched && !key.trim()) { setError(true); setMessage('Enter a key for the selected provider before saving.'); return; } try { const value = current(); save(value); setSettings(value); setKey(''); setSwitched(false); setError(false); setMessage('Saved.'); } catch { setError(true); setMessage('Unable to save settings.'); } }}>Save</button>
     <button type="button" onClick={() => { try { clear(); setSettings({ ...settings, apiKey: '' }); setKey(''); setError(false); setMessage('Key cleared.'); } catch { setError(true); setMessage('Unable to clear key.'); } }}>Clear key</button>
-    <button type="button" onClick={async () => { if (inFlight.current) return; if (switched) { setError(true); setMessage('Save a key for the selected provider before testing.'); return; } inFlight.current = true; setPending(true); setMessage(''); try { await testConnection(kind, current()); setError(false); setMessage('Connection successful.'); } catch (reason) { setError(true); setMessage(redactProviderError(reason).message); } finally { inFlight.current = false; setPending(false); } }}>Test connection</button>
+    <button type="button" onClick={async () => { if (!acquire(kind)) return; try { if (switched) { setError(true); setMessage('Save a key for the selected provider before testing.'); return; } setMessage(''); await testConnection(kind, current()); setError(false); setMessage('Connection successful.'); } catch (reason) { setError(true); setMessage(redactProviderError(reason).message); } finally { release(kind); } }}>Test connection</button>
     {message && <p role={error ? 'alert' : 'status'}>{message}</p>}
   </fieldset>;
 }
