@@ -6,12 +6,13 @@ import type { VoiceDraft } from '../../domain/model';
 import { evaluateSet } from '../../domain/scoring';
 import type { AudioRecorder } from '../../infrastructure/audio/mediaRecorder';
 
-type Service = { createDraftFromAudio(input: { matchId: string; setId: string; audio: Blob; mimeType: string }, signal: AbortSignal): Promise<Pick<VoiceDraft, 'id' | 'state'>> };
+type Service = { persistDraftFromAudio(input: { matchId: string; setId: string; audio: Blob; mimeType: string }): Promise<Pick<VoiceDraft, 'id' | 'state'>> };
 type Scheduler = { schedule(action: () => void, delay: number): () => void };
 const defaultScheduler: Scheduler = { schedule(action, delay) { const id = setTimeout(action, delay); return () => clearTimeout(id); } };
 type Props = { repository?: TennisRepository; createRecorder?: () => AudioRecorder; createService?: (repository: TennisRepository) => Service; scheduler?: Scheduler };
-type State = 'idle' | 'requesting-permission' | 'recording' | 'stopping' | 'processing' | 'waiting-retry' | 'error';
-const messages: Record<string, string> = { permission:'Microphone permission was denied or unavailable.', unsupported:'Audio recording or its format is not supported on this device.', empty:'The recording was empty. Please try again.', failed:'Recording failed. Please try again.', start:'Recording could not start. Please try again.' };
+type State = 'idle' | 'requesting-permission' | 'recording' | 'stopping' | 'saving' | 'error';
+const draftLabels: Record<VoiceDraft['state'], string> = { recorded:'recorded, not yet processed', processing:'processing was interrupted', 'waiting-retry':'waiting to retry', ready:'ready for review', error:'needs attention', confirming:'confirmation was interrupted' };
+const messages: Record<string, string> = { permission:'Microphone permission was denied or unavailable.', unsupported:'Audio recording or its format is not supported on this device.', empty:'The recording was empty. Please try again.', failed:'Recording failed. Please try again.', start:'Recording could not start. Please try again.', storage:'The recording could not be saved on this device. It is kept on this page; retry saving before leaving.' };
 
 export default function RecordPage(props: Props) {
   const { matchId = '' } = useParams();
@@ -21,8 +22,10 @@ function RecordContent({ matchId, repository, createRecorder = dependencies.crea
   const navigate = useNavigate();
   const [loaded, setLoaded] = useState<{ repo: TennisRepository; setId: string }>();
   const [loading, setLoading] = useState(true); const [loadError, setLoadError] = useState(''); const [attempt, setAttempt] = useState(0);
+  const [drafts, setDrafts] = useState<VoiceDraft[]>([]); const [listError, setListError] = useState(false);
   const [state, setState] = useState<State>('idle'); const [error, setError] = useState('');
-  const recorder = useRef<AudioRecorder | null>(null); const lock = useRef(false); const alive = useRef(true); const timer = useRef<(() => void) | undefined>(undefined); const abort = useRef<AbortController | null>(null); const generation = useRef(0);
+  const [unsaved, setUnsaved] = useState<{ blob: Blob; mimeType: string } | null>(null);
+  const recorder = useRef<AudioRecorder | null>(null); const lock = useRef(false); const alive = useRef(true); const timer = useRef<(() => void) | undefined>(undefined); const generation = useRef(0);
   useEffect(() => {
     alive.current = true; let cancelled = false; let owned: TennisRepository | undefined;
     const close = () => { const current = owned; owned = undefined; current?.close(); };
@@ -30,8 +33,9 @@ function RecordContent({ matchId, repository, createRecorder = dependencies.crea
       try {
         const repo = repository ?? await dependencies.openDatabase(); if (!repository) owned = repo;
         if (cancelled) { close(); return; }
-        const bundle = await repo.getMatchBundle(matchId);
+        const [bundle, retained] = await Promise.all([repo.getMatchBundle(matchId), repo.listDrafts(matchId).then(list => list, () => undefined)]);
         if (cancelled) return;
+        setDrafts([...(retained ?? [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt))); setListError(!retained);
         const set = bundle?.sets.find(item => item.status === 'active');
         if (!bundle || bundle.match.id !== matchId) { close(); setLoadError('Match not found.'); }
         else if (bundle.match.status !== 'active' || !set || set.matchId !== matchId || set.kind !== 'standard') { close(); setLoadError('No active standard set is available for recording.'); }
@@ -44,14 +48,14 @@ function RecordContent({ matchId, repository, createRecorder = dependencies.crea
       } catch { close(); if (!cancelled) { setLoadError('Could not load match. Please try again.'); setLoading(false); } }
     }
     void load();
-    return () => { cancelled = true; alive.current = false; generation.current++; timer.current?.(); abort.current?.abort(); void recorder.current?.cancel().catch(() => {}); recorder.current = null; close(); };
+    return () => { cancelled = true; alive.current = false; generation.current++; timer.current?.(); void recorder.current?.cancel().catch(() => {}); recorder.current = null; close(); };
   }, [repository, matchId, attempt]);
   function showError(reason: unknown) {
     let code = ''; try { code = (reason as { code?: string })?.code ?? ''; } catch { /* Untrusted error. */ }
     setError(messages[code] ?? 'Recording or processing failed. Please try again. Previously saved recordings may still be available.'); setState('error');
   }
   async function start() {
-    if (lock.current || !loaded) return; lock.current = true; const token = ++generation.current; setError(''); setState('requesting-permission');
+    if (lock.current || !loaded) return; lock.current = true; const token = ++generation.current; setError(''); setUnsaved(null); setState('requesting-permission');
     try {
       const current = createRecorder(); recorder.current = current; await current.start();
       if (!alive.current || token !== generation.current) return;
@@ -66,25 +70,38 @@ function RecordContent({ matchId, repository, createRecorder = dependencies.crea
       if (!alive.current || token !== generation.current) return;
       recorder.current = null;
       if (!audio.blob.size) { showError({ code:'empty' }); return; }
-      setState('processing'); const controller = new AbortController(); abort.current = controller;
-      const draft = await createService(loaded.repo).createDraftFromAudio({ matchId, setId:loaded.setId, audio:audio.blob, mimeType:audio.mimeType }, controller.signal);
-      if (!alive.current || token !== generation.current) return;
-      if (draft.state === 'waiting-retry') setState('waiting-retry');
-      navigate(`/voice/${encodeURIComponent(draft.id)}`);
+      setUnsaved(audio); await persist(audio, token);
     } catch (e) { if (alive.current && token === generation.current) showError(e); }
     finally { if (token === generation.current) lock.current = false; }
   }
+  async function persist(audio: { blob: Blob; mimeType: string }, token: number) {
+    if (!loaded) return;
+    setError(''); setState('saving');
+    // Persist only; provider processing runs on the review page so an interruption never strands the audio.
+    const draft = await createService(loaded.repo).persistDraftFromAudio({ matchId, setId:loaded.setId, audio:audio.blob, mimeType:audio.mimeType });
+    if (!alive.current || token !== generation.current) return;
+    setUnsaved(null); navigate(`/voice/${encodeURIComponent(draft.id)}`);
+  }
+  async function retrySave() {
+    if (lock.current || !unsaved) return; lock.current = true; const token = ++generation.current;
+    try { await persist(unsaved, token); }
+    catch (e) { if (alive.current && token === generation.current) showError(e); }
+    finally { if (token === generation.current) lock.current = false; }
+  }
   async function cancel() {
-    const token = ++generation.current; timer.current?.(); timer.current = undefined; abort.current?.abort(); const current = recorder.current; recorder.current = null; lock.current = false;
+    const token = ++generation.current; timer.current?.(); timer.current = undefined; const current = recorder.current; recorder.current = null; lock.current = false;
     try { await current?.cancel(); } catch { /* Cancellation remains safe. */ }
     if (alive.current && token === generation.current) { setError(''); setState('idle'); }
   }
   if (loading) return <section><h1>Record voice entry</h1><p role="status">Loading match…</p></section>;
   return <section className="record-page"><h1>Record voice entry</h1>
+    {!!drafts.length && <><h2>Saved voice drafts</h2><ul>{drafts.map(draft => <li key={draft.id}><Link to={`/voice/${encodeURIComponent(draft.id)}`}>Resume draft from {draft.createdAt} — {draftLabels[draft.state] ?? 'needs attention'}</Link></li>)}</ul></>}
+    {listError && <p>Saved drafts could not be listed. Recording is still available.</p>}
     {loadError ? <><p role="alert">{loadError}</p><button onClick={() => { setLoading(true); setLoadError(''); setLoaded(undefined); setAttempt(n => n + 1); }}>Retry</button></> : <>
       <p>Record up to two minutes. Recording stops automatically at the limit.</p>
-      <p role="status" aria-live="polite">{({ idle:'Ready to record.', 'requesting-permission':'Requesting microphone permission…', recording:'Recording…', stopping:'Stopping recording…', processing:'Processing recording…', 'waiting-retry':'Waiting to retry.', error:'Recording unavailable.' } as const)[state]}</p>
+      <p role="status" aria-live="polite">{({ idle:'Ready to record.', 'requesting-permission':'Requesting microphone permission…', recording:'Recording…', stopping:'Stopping recording…', saving:'Saving recording…', error:'Recording unavailable.' } as const)[state]}</p>
       {error && <p role="alert">{error}</p>}
+      {unsaved && state === 'error' && <><p>This recording has not been saved yet. Starting a new recording discards it.</p><button onClick={() => void retrySave()}>Retry saving recording</button></>}
       {(state === 'idle' || state === 'error') && <button onClick={() => void start()}>Start recording</button>}
       {state === 'recording' && <button onClick={() => void stop()}>Stop recording</button>}
       {(state === 'requesting-permission' || state === 'recording' || state === 'stopping') && <button onClick={() => void cancel()}>Cancel recording</button>}

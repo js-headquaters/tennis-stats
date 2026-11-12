@@ -22,9 +22,10 @@ export interface TennisRepository {
   deleteMatch(id: string): Promise<void>;
   saveDraft(draft: VoiceDraft): Promise<void>;
   getDraft(id: string): Promise<VoiceDraft | undefined>;
+  listDrafts(matchId?: string): Promise<VoiceDraft[]>;
   getDraftConfirmation(draftId: string): Promise<{ confirmationId: string; matchId: string; confirmedAt: string } | undefined>;
   deleteDraft(id: string): Promise<void>;
-  confirmDraft(draftId: string, confirmationId: string, preparedBundle: MatchBundle, confirmedAt: string): Promise<{ status: 'confirmed' | 'alreadyConfirmed' }>;
+  confirmDraft(draftId: string, confirmationId: string, preparedBundle: MatchBundle, confirmedAt: string, baseBundle: MatchBundle): Promise<{ status: 'confirmed' | 'alreadyConfirmed' }>;
   listOpponents(): Promise<Opponent[]>;
   replaceAll(snapshot: DatabaseSnapshot): Promise<void>;
   close(): void;

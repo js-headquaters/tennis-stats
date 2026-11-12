@@ -93,3 +93,40 @@ it('releases an active recorder and does not close an injected repository on unm
   const { recorder, repository, view } = setup(); fireEvent.click(await screen.findByRole('button', { name:'Start recording' })); await screen.findByRole('button', { name:'Stop recording' });
   view.unmount(); expect(recorder.cancel).toHaveBeenCalledTimes(1); expect(repository.close).not.toHaveBeenCalled();
 });
+it('blocks confirmation while a card has unsaved edits and permits it after saving', async () => {
+  const { service } = setup();
+  const card = await screen.findByRole('form', { name:'Draft game 1' });
+  fireEvent.change(within(card).getByLabelText('Net errors'), { target:{ value:'0' } });
+  expect(screen.getByRole('button', { name:'Confirm and add' })).toBeDisabled();
+  expect(screen.getByText(/save or discard/i)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name:'Confirm and add' })); expect(service.confirmDraft).not.toHaveBeenCalled();
+  service.updateDraftGame.mockResolvedValueOnce({ ...draft, parsedDraft:{ ...draft.parsedDraft!, games:[{ ...draft.parsedDraft!.games[0], netErrors:0 }] } });
+  fireEvent.click(within(card).getByRole('button', { name:'Save game 1' }));
+  await waitFor(() => expect(screen.getByRole('button', { name:'Confirm and add' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name:'Confirm and add' })); expect(await screen.findByText('Live match')).toBeInTheDocument();
+});
+it.each(['processing', 'confirming'] as const)('allows recovery of a reloaded %s draft', async state => {
+  const { service } = setup({ ...draft, state });
+  const button = await screen.findByRole('button', { name: state === 'processing' ? 'Retry processing' : 'Resume confirmation' });
+  fireEvent.click(button); fireEvent.click(button);
+  if (state === 'processing') await waitFor(() => expect(service.retryDraft).toHaveBeenCalledTimes(1));
+  else { expect(await screen.findByText('Live match')).toBeInTheDocument(); expect(service.confirmDraft).toHaveBeenCalledTimes(1); }
+});
+it('starts processing a freshly recorded draft once on arrival', async () => {
+  const recorded = { ...draft, state:'recorded' as const, transcripts:[], parsedDraft:null, recording:new Blob(['audio']), mimeType:'audio/mp4' };
+  const { service } = setup(recorded);
+  await waitFor(() => expect(service.retryDraft).toHaveBeenCalledTimes(1));
+  expect(service.retryDraft).toHaveBeenCalledWith('d', expect.any(AbortSignal));
+  expect(await screen.findByText('Ready for review.')).toBeInTheDocument(); expect(service.retryDraft).toHaveBeenCalledTimes(1);
+  expect(service.confirmDraft).not.toHaveBeenCalled();
+});
+it('discarding unsaved edits restores the saved values and re-enables confirmation', async () => {
+  const { service } = setup();
+  const card = await screen.findByRole('form', { name:'Draft game 1' });
+  fireEvent.change(within(card).getByLabelText('Wide errors'), { target:{ value:'3' } });
+  expect(screen.getByRole('button', { name:'Confirm and add' })).toBeDisabled(); expect(screen.getByRole('button', { name:'Start recording' })).toBeDisabled();
+  fireEvent.click(within(card).getByRole('button', { name:'Discard edits' }));
+  expect(within(card).getByLabelText('Wide errors')).toHaveValue('0');
+  expect(screen.getByRole('button', { name:'Confirm and add' })).toBeEnabled(); expect(screen.queryByText(/save or discard/i)).not.toBeInTheDocument();
+  expect(service.updateDraftGame).not.toHaveBeenCalled();
+});

@@ -24,6 +24,8 @@ function ReviewContent({ draftId, repository, createService = dependencies.creat
   const [loaded, setLoaded] = useState<{ draft: VoiceDraft; repo: TennisRepository; service: ReturnType<NonNullable<Props['createService']>> }>();
   const [loading, setLoading] = useState(true); const [loadError, setLoadError] = useState(''); const [attempt, setAttempt] = useState(0);
   const [operation, setOperation] = useState(''); const [error, setError] = useState('');
+  const [dirty, setDirty] = useState<Set<number>>(() => new Set()); const dirtyRef = useRef(new Set<number>());
+  function dirtyChanged(index: number, value: boolean) { const next = new Set(dirtyRef.current); if (value) next.add(index); else next.delete(index); dirtyRef.current = next; setDirty(next); }
   const alive = useRef(true); const lock = useRef(false); const generation = useRef(0); const recorder = useRef<AudioRecorder | null>(null); const timer = useRef<(() => void) | undefined>(undefined); const abort = useRef<AbortController | null>(null);
   useEffect(() => {
     alive.current = true; let cancelled = false; let owned: TennisRepository | undefined;
@@ -62,19 +64,19 @@ function ReviewContent({ draftId, repository, createService = dependencies.creat
     finally { if (alive.current) finish(); }
   }
   async function retry() {
-    if (!loaded || !begin('processing')) return; const controller = new AbortController(); abort.current = controller;
+    if (!loaded || dirtyRef.current.size || !begin('processing')) return; const controller = new AbortController(); abort.current = controller;
     try { const draft = await loaded.service.retryDraft(draftId, controller.signal); if (alive.current) setLoaded({ ...loaded, draft }); }
     catch { await refresh(); if (alive.current) setError('Could not retry the draft. Previously saved recordings may still be available.'); }
     finally { if (alive.current) finish(); }
   }
   async function confirm() {
-    if (!loaded || !begin('confirming')) return;
+    if (!loaded || dirtyRef.current.size || !begin('confirming')) return;
     try { const result = await loaded.service.confirmDraft(draftId); if (alive.current) navigate(`/matches/${encodeURIComponent(result.bundle.match.id)}/live`, { replace:true }); }
     catch { await refresh(); if (alive.current) setError('Could not confirm the draft. Please try again.'); }
     finally { if (alive.current) finish(); }
   }
   async function start() {
-    if (!loaded || !begin('requesting')) return; const token = ++generation.current;
+    if (!loaded || dirtyRef.current.size || !begin('requesting')) return; const token = ++generation.current;
     try { const current = createRecorder(); recorder.current = current; await current.start(); if (!alive.current || token !== generation.current) return; setOperation('recording'); timer.current = scheduler.schedule(() => { void stop(); }, 120000); }
     catch (e) { if (alive.current && token === generation.current) { setError(messageFor(recorderMessages, safeCode(e), 'Recording failed. Please try again.')); finish(); } }
   }
@@ -85,6 +87,12 @@ function ReviewContent({ draftId, repository, createService = dependencies.creat
     finally { if (alive.current && token === generation.current) finish(); }
   }
   const operationRef = useRef(operation); operationRef.current = operation;
+  const autoProcessed = useRef(false);
+  useEffect(() => {
+    // A draft persisted straight from the recorder is processed here, so a reload or interruption leaves it retryable.
+    if (loaded?.draft.state !== 'recorded' || autoProcessed.current) return;
+    autoProcessed.current = true; void retry();
+  }, [loaded]);
   async function cancel() { const token = ++generation.current; timer.current?.(); timer.current = undefined; abort.current?.abort(); const current = recorder.current; recorder.current = null; try { await current?.cancel(); } catch { /* Safe cancellation. */ } if (alive.current && token === generation.current) { setError(''); finish(); } }
   const draft = loaded?.draft; const busy = !!operation;
   const state = operation === 'processing' ? 'Processing draft…' : operation === 'confirming' ? 'Confirming draft…' : operation === 'recording' ? 'Recording…' : operation === 'requesting' ? 'Requesting microphone permission…' : operation === 'stopping' ? 'Stopping recording…' : operation === 'saving' ? 'Saving game…' : draft?.state === 'waiting-retry' ? 'Waiting to retry.' : draft?.state === 'processing' ? 'Processing draft…' : draft?.state === 'confirming' ? 'Confirming draft…' : draft?.state === 'ready' ? 'Ready for review.' : 'Draft needs attention.';
@@ -96,13 +104,15 @@ function ReviewContent({ draftId, repository, createService = dependencies.creat
         {error && <p role="alert">{error}</p>}
         <h2>Transcript history</h2>{draft.transcripts.length ? <ol>{draft.transcripts.map((item, index) => <li key={index}><p>{item.text}</p><p>Provider: {item.provider} · Model: {item.model}</p></li>)}</ol> : <p>No transcript yet.</p>}
         {!!draft.parsedDraft?.warnings.length && <><h2>Warnings</h2><ul>{draft.parsedDraft.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></>}
-        {draft.parsedDraft && <><h2>Games</h2>{draft.parsedDraft.games.map((game, index) => <DraftGameCard key={index} game={game} index={index} busy={busy || draft.state !== 'ready'} onUpdate={update} />)}</>}
-        {(draft.state === 'waiting-retry' || draft.state === 'error' || draft.state === 'recorded') && <button disabled={busy} onClick={() => void retry()}>Retry processing</button>}
+        {draft.parsedDraft && <><h2>Games</h2>{draft.parsedDraft.games.map((game, index) => <DraftGameCard key={index} game={game} index={index} busy={busy || draft.state !== 'ready'} onUpdate={update} onDirtyChange={dirtyChanged} />)}</>}
+        {!!dirty.size && <p>Save or discard your edits before continuing.</p>}
+        {(draft.state === 'waiting-retry' || draft.state === 'error' || draft.state === 'recorded' || draft.state === 'processing') && <button disabled={busy || !!dirty.size} onClick={() => void retry()}>Retry processing</button>}
+        {draft.state === 'confirming' && <button disabled={busy || !!dirty.size || !draft.parsedDraft?.games.length} onClick={() => void confirm()}>Resume confirmation</button>}
         <h2>Add or correct by voice</h2><p>Record up to two minutes. Recording stops automatically at the limit.</p>
-        {!['requesting', 'recording', 'stopping'].includes(operation) && <button disabled={busy} onClick={() => void start()}>Start recording</button>}
+        {!['requesting', 'recording', 'stopping'].includes(operation) && <button disabled={busy || !!dirty.size} onClick={() => void start()}>Start recording</button>}
         {operation === 'recording' && <button onClick={() => void stop()}>Stop recording</button>}
         {['requesting', 'recording', 'stopping'].includes(operation) && <button onClick={() => void cancel()}>Cancel recording</button>}
-        <p><button disabled={busy || draft.state !== 'ready' || !draft.parsedDraft?.games.length} onClick={() => void confirm()}>Confirm and add</button></p>
+        <p><button disabled={busy || !!dirty.size || draft.state !== 'ready' || !draft.parsedDraft?.games.length} onClick={() => void confirm()}>Confirm and add</button></p>
       </>}
     </>}
     <p><Link to={draft ? `/matches/${encodeURIComponent(draft.matchId)}/live` : '/matches'}>Manual entry / live match</Link> <Link to="/settings">Settings</Link></p>

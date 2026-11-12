@@ -80,10 +80,14 @@ export function createDraftService({ repository, transcriber, parser, clock, ids
     } catch (error) { return providerFailure(error, 'parser'); }
     return save({ ...current, parsedDraft: parsed, state: 'ready', error: null });
   }
-  function createDraftFromAudio(input: AudioInput & { matchId: string; setId: string }, signal: AbortSignal) {
+  function persistDraftFromAudio(input: AudioInput & { matchId: string; setId: string }) {
     const now = clock.now();
     const draft: VoiceDraft = { id: ids.next(), confirmationId: ids.next(), matchId: input.matchId, setId: input.setId, dataVersion: 1, recording: input.audio, mimeType: input.mimeType, transcripts: [], parsedDraft: null, state: 'recorded', error: null, createdAt: now, updatedAt: now };
-    return guard(draft.id, async () => { await applicable(draft); await save(draft); return process(draft, 'transcription', signal); });
+    return guard(draft.id, async () => { await applicable(draft); return save(draft); });
+  }
+  async function createDraftFromAudio(input: AudioInput & { matchId: string; setId: string }, signal: AbortSignal) {
+    const draft = await persistDraftFromAudio(input);
+    return retryDraft(draft.id, signal);
   }
   function retryDraft(id: string, signal: AbortSignal) {
     return guard(id, async () => { const draft = await load(id); return process(draft, draft.error?.phase === 'parser' && draft.transcripts.length ? 'parser' : 'transcription', signal); });
@@ -125,7 +129,7 @@ export function createDraftService({ repository, transcriber, parser, clock, ids
       if (found.sets.find(s => s.status === 'active')?.id !== draft.setId) throw new Error('No active standard set for draft');
       if (!draftSchema.safeParse(draft.parsedDraft).success) throw new Error('Invalid draft games');
       const prepared = prepareGames(found, draft.parsedDraft.games, { clock, ids });
-      const result = await storage(() => repository.confirmDraft(id, draft.confirmationId, prepared, clock.now()));
+      const result = await storage(() => repository.confirmDraft(id, draft.confirmationId, prepared, clock.now(), found));
       const durable = await confirmed(id, draft);
       if (!durable) throw new DraftStorageError();
       return { ...durable, status: result.status };
@@ -151,5 +155,5 @@ export function createDraftService({ repository, transcriber, parser, clock, ids
     confirmations.set(id, promise);
     return promise;
   }
-  return { createDraftFromAudio, retryDraft, refineDraftWithAudio, updateDraftGame, confirmDraft };
+  return { persistDraftFromAudio, createDraftFromAudio, retryDraft, refineDraftWithAudio, updateDraftGame, confirmDraft };
 }

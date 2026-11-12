@@ -5,6 +5,7 @@ import type { MatchBundle, DatabaseSnapshot, VoiceDraft } from '../../domain/mod
 import { openDatabase } from './database';
 import { TennisDatabase } from './schema';
 import { IndexedDbTennisRepository } from './repositories';
+import { DATA_VERSION } from './migrations';
 
 const stamp = { createdAt: '2026-01-01', updatedAt: '2026-01-01' };
 const bundle = (id: string, status: 'active' | 'completed' = 'active'): MatchBundle => ({
@@ -26,10 +27,31 @@ async function setup() {
 function indexedDBDelete(name: string) { return new Promise<void>((resolve, reject) => { const request = indexedDB.deleteDatabase(name); request.onsuccess = () => resolve(); request.onerror = () => reject(request.error); }); }
 
 describe('IndexedDB repository', () => {
+  it.each([
+    ['an added game', (b: MatchBundle) => ({ ...b, games: [...b.games, { ...b.games[0], id: 'manual', ordinal: 3 }] })],
+    ['an edited match comment', (b: MatchBundle) => ({ ...b, match: { ...b.match, comments: 'manual edit' } })],
+    ['a metric changed from 0 to unknown', (b: MatchBundle) => ({ ...b, games: b.games.map(g => g.ordinal === 1 ? { ...g, netErrors: null } : g) })],
+    ['a removed tie-break metric', (b: MatchBundle) => ({ ...b, tieBreaks: b.tieBreaks.map(t => ({ ...t, wideErrors: null })) })],
+  ])('rejects confirmation against a stale base after %s, keeping the edit and the draft', async (_label, edit) => {
+    const repo = await setup(); const base = bundle('m'); await repo.saveMatchBundle(base); await repo.saveDraft(draftFixture('m'));
+    const edited = edit((await repo.getMatchBundle('m'))!); await repo.saveMatchBundle(edited);
+    const prepared = { ...base, games: [...base.games, { ...base.games[0], id: 'voice', setId: 'm-s2', ordinal: 1 }] };
+    await expect(repo.confirmDraft('d', 'c', prepared, 'now', base)).rejects.toThrow(/changed/i);
+    expect((await repo.getMatchBundle('m'))?.games.map(g => g.id).sort()).toEqual(edited.games.map(g => g.id).sort());
+    expect((await repo.getMatchBundle('m'))?.match.comments).toBe(edited.match.comments);
+    expect(await repo.getDraft('d')).toEqual(draftFixture('m')); expect(await repo.getDraftConfirmation('d')).toBeUndefined();
+  });
+  it('accepts an unchanged base regardless of entity order or key order', async () => {
+    const repo = await setup(); const base = bundle('m'); await repo.saveMatchBundle(base); await repo.saveDraft(draftFixture('m'));
+    const stored = (await repo.getMatchBundle('m'))!;
+    const reordered: MatchBundle = { tieBreaks: [...stored.tieBreaks], games: [...stored.games].reverse(), sets: [...stored.sets].reverse(), opponent: { ...stored.opponent }, match: Object.fromEntries(Object.entries(stored.match).reverse()) as MatchBundle['match'] };
+    const prepared = { ...stored, games: [...stored.games, { ...stored.games[0], id: 'voice', setId: 'm-s2', ordinal: 1 }] };
+    expect(await repo.confirmDraft('d', 'c', prepared, 'now', reordered)).toEqual({ status: 'confirmed' });
+  });
   it('does not recreate a draft when its save is queued behind confirmation', async () => {
     const repo = await setup(); const initial = bundle('m'); const draft = draftFixture('m');
     await repo.saveMatchBundle(initial); await repo.saveDraft(draft);
-    const confirming = repo.confirmDraft('d', 'c', initial, 'now');
+    const confirming = repo.confirmDraft('d', 'c', initial, 'now', bundle('m'));
     const saving = repo.saveDraft(draft);
     await confirming;
     await expect(saving).rejects.toThrow();
@@ -74,7 +96,7 @@ describe('IndexedDB repository', () => {
     const initial = bundle('m'); await repo.saveMatchBundle(initial);
     const draft = { ...draftFixture('m'), recording: new Blob(['audio']) }; await repo.saveDraft(draft);
     const before = await repo.getMatchBundle('m');
-    await expect(repo.confirmDraft('d', 'c', { ...initial, games: [] }, 'now')).rejects.toThrow('injected');
+    await expect(repo.confirmDraft('d', 'c', { ...initial, games: [] }, 'now', bundle('m'))).rejects.toThrow('injected');
     expect(await repo.getMatchBundle('m')).toEqual(before);
     expect(await repo.getDraft('d')).toEqual(draft);
     expect(await (await repo.getDraft('d'))?.recording?.text()).toBe('audio');
@@ -85,23 +107,23 @@ describe('IndexedDB repository', () => {
     const a = await openDatabase(name); const b = await openDatabase(name);
     cleanup.push(async () => { a.close(); b.close(); await indexedDBDelete(name); });
     const initial = bundle('m'); await a.saveMatchBundle(initial); await a.saveDraft(draftFixture('m'));
-    const results = await Promise.all([a.confirmDraft('d', 'c', initial, 'now'), b.confirmDraft('d', 'c', initial, 'now')]);
+    const results = await Promise.all([a.confirmDraft('d', 'c', initial, 'now', bundle('m')), b.confirmDraft('d', 'c', initial, 'now', bundle('m'))]);
     expect(results.map(r => r.status).sort()).toEqual(['alreadyConfirmed', 'confirmed']);
     expect((await a.getMatchBundle('m'))?.games).toHaveLength(2);
   });
   it('rejects wrong bindings, missing drafts, invalid relationships and marker collisions', async () => {
     const repo = await setup(); const initial = bundle('m'); await repo.saveMatchBundle(initial); await repo.saveDraft(draftFixture('m'));
-    await expect(repo.confirmDraft('missing', 'c', initial, 'now')).rejects.toThrow();
-    await expect(repo.confirmDraft('d', 'wrong', initial, 'now')).rejects.toThrow();
-    await expect(repo.confirmDraft('d', 'c', bundle('other'), 'now')).rejects.toThrow();
-    await expect(repo.confirmDraft('d', 'c', { ...initial, games: [{ ...initial.games[0], setId: 'missing' }] }, 'now')).rejects.toThrow();
+    await expect(repo.confirmDraft('missing', 'c', initial, 'now', bundle('m'))).rejects.toThrow();
+    await expect(repo.confirmDraft('d', 'wrong', initial, 'now', bundle('m'))).rejects.toThrow();
+    await expect(repo.confirmDraft('d', 'c', bundle('other'), 'now', bundle('m'))).rejects.toThrow();
+    await expect(repo.confirmDraft('d', 'c', { ...initial, games: [{ ...initial.games[0], setId: 'missing' }] }, 'now', bundle('m'))).rejects.toThrow();
     expect(await repo.getDraft('d')).toBeDefined();
-    await repo.confirmDraft('d', 'c', initial, 'now');
+    await repo.confirmDraft('d', 'c', initial, 'now', bundle('m'));
     await repo.saveMatchBundle(initial);
-    expect(await repo.confirmDraft('d', 'c', initial, 'later')).toEqual({ status: 'alreadyConfirmed' });
-    await expect(repo.confirmDraft('d', 'other', initial, 'now')).rejects.toThrow();
-    await expect(repo.confirmDraft('other', 'c', initial, 'now')).rejects.toThrow(/marker/i);
-    await expect(repo.confirmDraft('d', 'c', bundle('other'), 'now')).rejects.toThrow(/marker/i);
+    expect(await repo.confirmDraft('d', 'c', initial, 'later', bundle('m'))).toEqual({ status: 'alreadyConfirmed' });
+    await expect(repo.confirmDraft('d', 'other', initial, 'now', bundle('m'))).rejects.toThrow();
+    await expect(repo.confirmDraft('other', 'c', initial, 'now', bundle('m'))).rejects.toThrow(/marker/i);
+    await expect(repo.confirmDraft('d', 'c', bundle('other'), 'now', bundle('m'))).rejects.toThrow(/marker/i);
   });
   it('rejects a malformed marker instead of treating it as a confirmed retry', async () => {
     const name = `malformed-${crypto.randomUUID()}`;
@@ -109,7 +131,7 @@ describe('IndexedDB repository', () => {
     const db = new TennisDatabase(name); await db.open();
     cleanup.push(async () => { db.close(); repo.close(); await indexedDBDelete(name); });
     await db.metadata.put({ key: 'draft-confirmation:c', value: { draftId: 'd', matchId: 'm', confirmedAt: '' } });
-    await expect(repo.confirmDraft('d', 'c', bundle('m'), 'now')).rejects.toThrow(/marker/i);
+    await expect(repo.confirmDraft('d', 'c', bundle('m'), 'now', bundle('m'))).rejects.toThrow(/marker/i);
   });
   it('looks up a durable confirmation by draft after reopening', async () => {
     const name = `lookup-${crypto.randomUUID()}`;
@@ -117,7 +139,7 @@ describe('IndexedDB repository', () => {
     cleanup.push(async () => { repo.close(); await indexedDBDelete(name); });
     await repo.saveMatchBundle(bundle('m')); await repo.saveDraft(draftFixture('m'));
     expect(await repo.getDraftConfirmation('d')).toBeUndefined();
-    await repo.confirmDraft('d', 'c', bundle('m'), 'now');
+    await repo.confirmDraft('d', 'c', bundle('m'), 'now', bundle('m'));
     repo.close();
     const reopened = await openDatabase(name);
     try { expect(await reopened.getDraftConfirmation('d')).toEqual({ confirmationId: 'c', matchId: 'm', confirmedAt: 'now' }); }
@@ -136,7 +158,7 @@ describe('IndexedDB repository', () => {
   it('rejects an empty confirmation timestamp without writing the bundle', async () => {
     const repo = await setup(); const initial = bundle('m');
     await repo.saveMatchBundle(initial); await repo.saveDraft(draftFixture('m'));
-    await expect(repo.confirmDraft('d', 'c', { ...initial, games: [] }, '')).rejects.toThrow();
+    await expect(repo.confirmDraft('d', 'c', { ...initial, games: [] }, '', bundle('m'))).rejects.toThrow();
     expect(await repo.getDraft('d')).toBeDefined();
     expect((await repo.getMatchBundle('m'))?.games).toHaveLength(2);
   });
@@ -150,12 +172,12 @@ describe('IndexedDB repository', () => {
     await repo.saveDraft(draft);
     expect(await repo.getDraft('d')).toEqual(draft);
     const prepared = { ...initial, games: [...initial.games, { ...initial.games[0], id: 'new-game', setId: 'm-s2' }] };
-    expect(await repo.confirmDraft('d', 'c', prepared, 'now')).toEqual({ status: 'confirmed' });
+    expect(await repo.confirmDraft('d', 'c', prepared, 'now', bundle('m'))).toEqual({ status: 'confirmed' });
     expect(await repo.getDraft('d')).toBeUndefined();
     repo.close();
     const reopened = await openDatabase(name);
     try {
-      expect(await reopened.confirmDraft('d', 'c', prepared, 'later')).toEqual({ status: 'alreadyConfirmed' });
+      expect(await reopened.confirmDraft('d', 'c', prepared, 'later', bundle('m'))).toEqual({ status: 'alreadyConfirmed' });
       expect((await reopened.getMatchBundle('m'))?.games).toHaveLength(3);
     } finally { reopened.close(); }
   });
@@ -240,14 +262,14 @@ describe('IndexedDB repository', () => {
   it('rejects invalid replacement without disturbing existing data', async () => {
     const repo = await setup(); await repo.saveMatchBundle(bundle('original'));
     const a = bundle('a'); const b = bundle('b');
-    const snapshot: DatabaseSnapshot = { dataVersion: 1, opponents: [a.opponent], matches: [a.match, b.match], sets: [], games: [], tieBreaks: [], voiceDrafts: [] };
+    const snapshot: DatabaseSnapshot = { dataVersion: DATA_VERSION, opponents: [a.opponent], matches: [a.match, b.match], sets: [], games: [], tieBreaks: [], voiceDrafts: [] };
     await expect(repo.replaceAll(snapshot)).rejects.toThrow();
     expect((await repo.getActiveMatch())?.match.id).toBe('original');
   });
   it.each(['opponent', 'set parent', 'game parent', 'tie-break parent', 'tie-break link', 'missing tie-break', 'draft parent'])('rejects a replacement with broken %s integrity', async broken => {
     const repo = await setup(); await repo.saveMatchBundle(bundle('original'));
     const item = bundle('a', 'completed');
-    const snapshot: DatabaseSnapshot = { dataVersion: 1, opponents: [item.opponent], matches: [item.match], sets: item.sets, games: item.games, tieBreaks: item.tieBreaks, voiceDrafts: [draftFixture('a')] };
+    const snapshot: DatabaseSnapshot = { dataVersion: DATA_VERSION, opponents: [item.opponent], matches: [item.match], sets: item.sets, games: item.games, tieBreaks: item.tieBreaks, voiceDrafts: [draftFixture('a')] };
     switch (broken) {
       case 'opponent': snapshot.matches[0].opponentId = 'missing'; break;
       case 'set parent': snapshot.sets[0].matchId = 'missing'; break;
@@ -264,7 +286,7 @@ describe('IndexedDB repository', () => {
   it('accepts a structurally connected replacement including a draft', async () => {
     const repo = await setup(); const item = bundle('a');
     const draft = draftFixture('a');
-    await repo.replaceAll({ dataVersion: 1, opponents: [item.opponent], matches: [item.match], sets: item.sets, games: item.games, tieBreaks: item.tieBreaks, voiceDrafts: [draft] });
+    await repo.replaceAll({ dataVersion: DATA_VERSION, opponents: [item.opponent], matches: [item.match], sets: item.sets, games: item.games, tieBreaks: item.tieBreaks, voiceDrafts: [draft] });
     expect((await repo.getActiveMatch())?.match.id).toBe('a');
     expect(await repo.getDraft('d')).toEqual(draft);
   });
@@ -281,7 +303,7 @@ describe('IndexedDB repository', () => {
   it('rolls back replacement if inserting records fails after clearing', async () => {
     const repo = await setup(); await repo.saveMatchBundle(bundle('original'));
     const item = bundle('a', 'completed');
-    const snapshot: DatabaseSnapshot = { dataVersion: 1, opponents: [item.opponent, item.opponent], matches: [item.match], sets: item.sets, games: item.games, tieBreaks: item.tieBreaks, voiceDrafts: [] };
+    const snapshot: DatabaseSnapshot = { dataVersion: DATA_VERSION, opponents: [item.opponent, item.opponent], matches: [item.match], sets: item.sets, games: item.games, tieBreaks: item.tieBreaks, voiceDrafts: [] };
     await expect(repo.replaceAll(snapshot)).rejects.toThrow();
     expect((await repo.getActiveMatch())?.match.id).toBe('original');
   });

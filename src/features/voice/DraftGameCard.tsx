@@ -8,11 +8,12 @@ function fieldsFor(game: DraftGame): Fields {
   return Object.fromEntries(metrics.map(([key]) => [key, game[key] === null ? '' : String(game[key])])) as Fields;
 }
 
-export default function DraftGameCard({ game, index, busy = false, onUpdate }: {
+export default function DraftGameCard({ game, index, busy = false, onUpdate, onDirtyChange }: {
   game: DraftGame;
   index: number;
   busy?: boolean;
   onUpdate: (index: number, patch: Partial<DraftGame>) => Promise<unknown>;
+  onDirtyChange?: (index: number, dirty: boolean) => void;
 }) {
   const signature = JSON.stringify([index, game]);
   const [source, setSource] = useState(signature);
@@ -37,6 +38,7 @@ export default function DraftGameCard({ game, index, busy = false, onUpdate }: {
   function changeServer(next: Server) {
     setServer(next);
     setFields(current => ({ ...current, [next === 'player' ? 'failedReturns' : 'doubleFaults']: '' }));
+    onDirtyChange?.(index, true);
   }
 
   function invalid(value: string) {
@@ -55,6 +57,7 @@ export default function DraftGameCard({ game, index, busy = false, onUpdate }: {
     setError(false);
     try {
       await onUpdate(index, patch);
+      onDirtyChange?.(index, false);
     } catch {
       setError(true);
     } finally {
@@ -66,7 +69,7 @@ export default function DraftGameCard({ game, index, busy = false, onUpdate }: {
   return <form className="game-card draft-game-card" aria-label={`Draft game ${index + 1}`} onSubmit={submit} noValidate>
     <h3>Game {index + 1}</h3>
     {error && <p role="alert">Could not save this game. Please try again.</p>}
-    <label>Result<select disabled={busy || pending} value={result} onChange={e => setResult(e.target.value as DraftGame['result'])}><option value="won">Won</option><option value="lost">Lost</option></select></label>
+    <label>Result<select disabled={busy || pending} value={result} onChange={e => { setResult(e.target.value as DraftGame['result']); onDirtyChange?.(index, true); }}><option value="won">Won</option><option value="lost">Lost</option></select></label>
     <label>Server<select disabled={busy || pending} value={server} onChange={e => changeServer(e.target.value as Server)}><option value="player">Player served</option><option value="opponent">Opponent served</option></select></label>
     <div className="metric-grid">{metrics.map(([key, label]) => {
       const inapplicable = (key === 'doubleFaults' && server !== 'player') || (key === 'failedReturns' && server !== 'opponent');
@@ -75,10 +78,11 @@ export default function DraftGameCard({ game, index, busy = false, onUpdate }: {
       const errorId = `${id}-${key}-error`;
       return <div className="metric" key={key} data-testid={`draft-metric-${key}`}>
         <span>{label}</span><strong>{value === '' ? <span aria-label="Unknown">—</span> : value}</strong>
-        <label>{label}<input type="text" inputMode="numeric" value={value} disabled={busy || pending || inapplicable} aria-invalid={hasError || undefined} aria-describedby={hasError ? errorId : undefined} onChange={e => setFields(current => ({ ...current, [key]: e.target.value }))} /></label>
+        <label>{label}<input type="text" inputMode="numeric" value={value} disabled={busy || pending || inapplicable} aria-invalid={hasError || undefined} aria-describedby={hasError ? errorId : undefined} onChange={e => { setFields(current => ({ ...current, [key]: e.target.value })); onDirtyChange?.(index, true); }} /></label>
         {hasError && <span id={errorId}>Enter a non-negative whole number or leave blank.</span>}
       </div>;
     })}</div>
     <button disabled={busy || pending} type="submit">{pending ? 'Saving…' : `Save game ${index + 1}`}</button>
+    <button disabled={busy || pending} type="button" onClick={() => { setFields(fieldsFor(game)); setServer(game.server); setResult(game.result); setError(false); setValidated(false); onDirtyChange?.(index, false); }}>Discard edits</button>
   </form>;
 }

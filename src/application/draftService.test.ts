@@ -21,6 +21,40 @@ async function setup() {
   return { repository, match, transcriber, parser, service, parsed, isOnline, name };
 }
 describe('draft processing', () => {
+  it('persists an audio draft without starting either provider', async () => {
+    const { service, repository, match, transcriber, parser } = await setup();
+    const draft = await service.persistDraftFromAudio({ matchId:match.match.id, setId:match.sets[0].id, audio:new Blob(['audio']), mimeType:'audio/mp4' });
+    expect(draft.state).toBe('recorded'); expect(await (await repository.getDraft(draft.id))?.recording?.text()).toBe('audio');
+    expect(transcriber.transcribe).not.toHaveBeenCalled(); expect(parser.parse).not.toHaveBeenCalled();
+  });
+  it('preserves two concurrently prepared drafts, requiring the stale one to retry', async () => {
+    const { service, match, repository } = await setup(); const signal = new AbortController().signal;
+    const a = await service.createDraftFromAudio({ matchId:match.match.id, setId:match.sets[0].id, audio:new Blob(['a']), mimeType:'audio/mp4' }, signal);
+    const b = await service.createDraftFromAudio({ matchId:match.match.id, setId:match.sets[0].id, audio:new Blob(['b']), mimeType:'audio/mp4' }, signal);
+    const original = repository.confirmDraft.bind(repository); let release!: () => void; let count = 0;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(repository, 'confirmDraft').mockImplementation(async (...args) => { if (++count === 2) release(); await gate; return original(...args); });
+    const results = await Promise.allSettled([service.confirmDraft(a.id), service.confirmDraft(b.id)]);
+    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+    const loser = results[0].status === 'rejected' ? a : b;
+    expect((await repository.getDraft(loser.id))?.state).toBe('ready');
+    expect((await service.confirmDraft(loser.id)).bundle.games).toHaveLength(2);
+  });
+  it('rejects a stale confirmation without losing a concurrent manual edit, then appends on retry', async () => {
+    const { service, match, repository } = await setup();
+    const draft = await service.createDraftFromAudio({ matchId:match.match.id, setId:match.sets[0].id, audio:new Blob(['a']), mimeType:'audio/mp4' }, new AbortController().signal);
+    const original = repository.confirmDraft.bind(repository);
+    vi.spyOn(repository, 'confirmDraft').mockImplementationOnce(async (...args) => {
+      const current = (await repository.getMatchBundle(match.match.id))!;
+      await repository.saveMatchBundle({ ...current, match:{ ...current.match, comments:'manual edit' } });
+      return original(...args);
+    });
+    await expect(service.confirmDraft(draft.id)).rejects.toThrow();
+    expect((await repository.getMatchBundle(match.match.id))?.match.comments).toBe('manual edit');
+    expect((await repository.getDraft(draft.id))?.state).toBe('ready');
+    const result = await service.confirmDraft(draft.id);
+    expect(result.bundle.match.comments).toBe('manual edit'); expect(result.bundle.games).toHaveLength(1);
+  });
   it('confirms once, shares the in-flight promise and reloads the persisted bundle', async () => {
     const { service, match, repository, transcriber, parser } = await setup();
     const draft = await service.createDraftFromAudio({ matchId: match.match.id, setId: match.sets[0].id, audio: new Blob(['a']), mimeType: 'audio/mp4' }, new AbortController().signal);

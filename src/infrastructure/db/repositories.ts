@@ -3,6 +3,18 @@ import type { DatabaseSnapshot, Match, MatchBundle, VoiceDraft } from '../../dom
 import { DATA_VERSION } from './migrations';
 import type { TennisDatabase } from './schema';
 
+// Stable serialization: object keys are sorted (by code unit, not locale); arrays keep their order.
+function stable(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`;
+  if (value && typeof value === 'object') return `{${Object.keys(value).sort().filter(key => (value as Record<string, unknown>)[key] !== undefined).map(key => `${JSON.stringify(key)}:${stable((value as Record<string, unknown>)[key])}`).join(',')}}`;
+  return JSON.stringify(value) ?? 'undefined';
+}
+// Bundle entities are compared by id, so storage order is irrelevant but every field (null vs 0 included) counts.
+function bundleSignature(bundle: MatchBundle): string {
+  const byId = (items: { id: string }[]) => [...items].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return stable({ match: bundle.match, opponent: bundle.opponent, sets: byId(bundle.sets), games: byId(bundle.games), tieBreaks: byId(bundle.tieBreaks) });
+}
+
 function isMarker(value: unknown): value is { draftId: string; matchId: string; confirmedAt: string } {
   if (!value || typeof value !== 'object') return false;
   const marker = value as Record<string, unknown>;
@@ -57,7 +69,7 @@ export class IndexedDbTennisRepository implements TennisRepository {
       await this.db.opponents.put(opponent); await this.db.matches.put(match);
       await this.db.sets.bulkAdd(sets); await this.db.games.bulkAdd(games); await this.db.tieBreaks.bulkAdd(tieBreaks);
   }
-  async confirmDraft(draftId: string, confirmationId: string, bundle: MatchBundle, confirmedAt: string): Promise<{ status: 'confirmed' | 'alreadyConfirmed' }> {
+  async confirmDraft(draftId: string, confirmationId: string, bundle: MatchBundle, confirmedAt: string, baseBundle: MatchBundle): Promise<{ status: 'confirmed' | 'alreadyConfirmed' }> {
     this.writable();
     return this.db.transaction('rw', [this.db.matches, this.db.opponents, this.db.sets, this.db.games, this.db.tieBreaks, this.db.drafts, this.db.metadata], async () => {
       const key = `draft-confirmation:${confirmationId}`;
@@ -68,7 +80,8 @@ export class IndexedDbTennisRepository implements TennisRepository {
       }
       if (!draftId || !confirmationId || !confirmedAt) throw new Error('Invalid draft confirmation');
       const draft = await this.db.drafts.get(draftId);
-      if (!draft || draft.confirmationId !== confirmationId || draft.matchId !== bundle.match.id || !await this.db.matches.get(draft.matchId)) throw new Error('Invalid draft confirmation');
+      const currentMatch = draft && await this.db.matches.get(draft.matchId);
+      if (!draft || draft.confirmationId !== confirmationId || draft.matchId !== bundle.match.id || !currentMatch || !baseBundle || baseBundle.match.id !== draft.matchId) throw new Error('Invalid draft confirmation');
       const set = await this.db.sets.get(draft.setId);
       if (!set || set.matchId !== draft.matchId || !bundle.sets.some(s => s.id === draft.setId && s.matchId === draft.matchId)) throw new Error('Invalid draft set');
       for (const item of await this.db.metadata.toArray()) {
@@ -76,6 +89,9 @@ export class IndexedDbTennisRepository implements TennisRepository {
         if (!isMarker(item.value)) throw new Error('Invalid confirmation marker');
         if (item.value.draftId === draftId) throw new Error('Draft already confirmed with another marker');
       }
+      const current = await this.assembleBundle(currentMatch);
+      // The prepared bundle replaces every child row, so it may only be written over the exact state it was prepared from.
+      if (bundleSignature(current) !== bundleSignature(baseBundle)) throw new Error('Match changed during confirmation');
       await this.writeBundle(bundle);
       await this.db.metadata.add({ key, value: { draftId, matchId: draft.matchId, confirmedAt } });
       this.confirmationHook?.();
@@ -101,6 +117,7 @@ export class IndexedDbTennisRepository implements TennisRepository {
     });
   }
   async getDraft(id: string) { return this.db.drafts.get(id); }
+  async listDrafts(matchId?: string) { return matchId ? this.db.drafts.where('matchId').equals(matchId).toArray() : this.db.drafts.toArray(); }
   async getDraftConfirmation(draftId: string) {
     let found: { confirmationId: string; matchId: string; confirmedAt: string } | undefined;
     for (const row of await this.db.metadata.toArray()) {
