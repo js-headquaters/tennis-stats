@@ -94,12 +94,27 @@ export class IndexedDbTennisRepository implements TennisRepository {
   async deleteMatch(id: string) { this.writable(); await this.db.transaction('rw', this.db.matches, this.db.sets, this.db.games, this.db.tieBreaks, this.db.drafts, async () => { await this.removeChildren(id); await this.db.drafts.where('matchId').equals(id).delete(); await this.db.matches.delete(id); }); }
   async saveDraft(draft: VoiceDraft) {
     this.writable();
-    await this.db.transaction('rw', this.db.matches, this.db.drafts, async () => {
+    await this.db.transaction('rw', this.db.matches, this.db.drafts, this.db.metadata, async () => {
       if (!await this.db.matches.get(draft.matchId)) throw new Error('Draft match missing');
+      if (await this.getDraftConfirmation(draft.id)) throw new Error('Draft already confirmed');
       await this.db.drafts.put(draft);
     });
   }
   async getDraft(id: string) { return this.db.drafts.get(id); }
+  async getDraftConfirmation(draftId: string) {
+    let found: { confirmationId: string; matchId: string; confirmedAt: string } | undefined;
+    for (const row of await this.db.metadata.toArray()) {
+      const prefix = 'draft-confirmation:';
+      if (!row.key.startsWith(prefix)) continue;
+      const confirmationId = row.key.slice(prefix.length);
+      if (!confirmationId || !isMarker(row.value)) throw new Error('Invalid confirmation marker');
+      if (row.value.draftId === draftId) {
+        if (found) throw new Error('Confirmation marker collision');
+        found = { confirmationId, matchId: row.value.matchId, confirmedAt: row.value.confirmedAt };
+      }
+    }
+    return found;
+  }
   async deleteDraft(id: string) { this.writable(); await this.db.drafts.delete(id); }
   async replaceAll(snapshot: DatabaseSnapshot) {
     this.writable();

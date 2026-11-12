@@ -9,7 +9,8 @@ import type { StatisticsParser, TranscriptionProvider } from './ports';
 const clock = { now: () => '2026-01-01T00:00:00.000Z' };
 let n = 0;
 async function setup() {
-  const repository = await openDatabase(`draft-service-${++n}`);
+  const name = `draft-service-${++n}`;
+  const repository = await openDatabase(name);
   const ids = { next: () => `id-${++n}` };
   const match = await startMatch({ opponentName: 'Alex', playedAt: clock.now(), firstServer: 'player' }, { repository, ids, clock });
   const transcriber = { transcribe: vi.fn<TranscriptionProvider['transcribe']>(async () => ({ text: 'won', provider: 'test', model: 'model' })) };
@@ -17,9 +18,94 @@ async function setup() {
   const parser = { parse: vi.fn<StatisticsParser['parse']>(async () => parsed) };
   const isOnline = vi.fn(() => true);
   const service = createDraftService({ repository, ids, clock, transcriber, parser, isOnline });
-  return { repository, match, transcriber, parser, service, parsed, isOnline };
+  return { repository, match, transcriber, parser, service, parsed, isOnline, name };
 }
 describe('draft processing', () => {
+  it('confirms once, shares the in-flight promise and reloads the persisted bundle', async () => {
+    const { service, match, repository, transcriber, parser } = await setup();
+    const draft = await service.createDraftFromAudio({ matchId: match.match.id, setId: match.sets[0].id, audio: new Blob(['a']), mimeType: 'audio/mp4' }, new AbortController().signal);
+    expect((await repository.getMatchBundle(match.match.id))?.games).toHaveLength(0);
+    const first = service.confirmDraft(draft.id); const second = service.confirmDraft(draft.id);
+    expect(first).toBe(second);
+    const result = await first;
+    expect(result.status).toBe('confirmed');
+    expect(result.bundle.games).toHaveLength(1);
+    expect(result.bundle).toEqual(await repository.getMatchBundle(match.match.id));
+    expect(await service.confirmDraft(draft.id)).toEqual({ status: 'alreadyConfirmed', bundle: result.bundle });
+    expect(transcriber.transcribe).toHaveBeenCalledTimes(1);
+    expect(parser.parse).toHaveBeenCalledTimes(1);
+  });
+  it('returns one persisted game batch when separate instances confirm concurrently', async () => {
+    const { service, match, repository, transcriber, parser, name } = await setup();
+    const draft = await service.createDraftFromAudio({ matchId: match.match.id, setId: match.sets[0].id, audio: new Blob(['a']), mimeType: 'audio/mp4' }, new AbortController().signal);
+    const secondRepository = await openDatabase(name);
+    const other = createDraftService({ repository: secondRepository, transcriber, parser, clock, ids: { next: () => `other-${++n}` }, isOnline: () => true });
+    const results = await Promise.all([service.confirmDraft(draft.id), other.confirmDraft(draft.id)]);
+    expect(results.map(r => r.status).sort()).toEqual(['alreadyConfirmed', 'confirmed']);
+    expect(results[0].bundle).toEqual(results[1].bundle);
+    expect(results[0].bundle.games).toHaveLength(1);
+    expect(await repository.getDraft(draft.id)).toBeUndefined();
+    secondRepository.close();
+  });
+  it('restores the complete draft after a failed confirmation transaction without leaking errors', async () => {
+    const { service, match, repository } = await setup();
+    const draft = await service.createDraftFromAudio({ matchId: match.match.id, setId: match.sets[0].id, audio: new Blob(['audio']), mimeType: 'audio/mp4' }, new AbortController().signal);
+    vi.spyOn(repository, 'confirmDraft').mockRejectedValueOnce(new Error('SECRET'));
+    await expect(service.confirmDraft(draft.id)).rejects.toMatchObject({ code: 'storage' });
+    const saved = await repository.getDraft(draft.id);
+    expect(saved).toEqual(draft);
+    expect(await saved?.recording?.text()).toBe('audio');
+    expect((await repository.getMatchBundle(match.match.id))?.games).toHaveLength(0);
+  });
+  it('does not call the confirmation transaction when saving confirming state fails', async () => {
+    const { service, match, repository } = await setup();
+    const draft = await service.createDraftFromAudio({ matchId: match.match.id, setId: match.sets[0].id, audio: new Blob(['a']), mimeType: 'audio/mp4' }, new AbortController().signal);
+    vi.spyOn(repository, 'saveDraft').mockRejectedValueOnce(new Error('SECRET'));
+    const transaction = vi.spyOn(repository, 'confirmDraft');
+    await expect(service.confirmDraft(draft.id)).rejects.toMatchObject({ code: 'storage' });
+    expect(transaction).not.toHaveBeenCalled();
+  });
+  it('persists multiple reviewed games with nulls, zeroes and their servers', async () => {
+    const { service, match, repository, parser, parsed } = await setup();
+    parser.parse.mockResolvedValueOnce({ ...parsed, games: [parsed.games[0], { ...parsed.games[0], server: 'opponent', result: 'lost', netErrors: null, failedReturns: 0 }] });
+    const draft = await service.createDraftFromAudio({ matchId: match.match.id, setId: match.sets[0].id, audio: new Blob(['a']), mimeType: 'audio/mp4' }, new AbortController().signal);
+    const result = await service.confirmDraft(draft.id);
+    expect(result.bundle.games).toMatchObject([{ server: 'player', netErrors: 0, wideErrors: null }, { server: 'opponent', netErrors: null, failedReturns: 0 }]);
+    expect(result.bundle).toEqual(await repository.getMatchBundle(match.match.id));
+  });
+  it('rejects a non-ready draft and preserves it', async () => {
+    const { service, match, repository, isOnline } = await setup();
+    isOnline.mockReturnValue(false);
+    const draft = await service.createDraftFromAudio({ matchId: match.match.id, setId: match.sets[0].id, audio: new Blob(['a']), mimeType: 'audio/mp4' }, new AbortController().signal);
+    await expect(service.confirmDraft(draft.id)).rejects.toThrow('not ready');
+    expect(await repository.getDraft(draft.id)).toEqual(draft);
+  });
+  it('preserves the draft on invalid preparation', async () => {
+    const { service, match, repository } = await setup();
+    const draft = await service.createDraftFromAudio({ matchId: match.match.id, setId: match.sets[0].id, audio: new Blob(['a']), mimeType: 'audio/mp4' }, new AbortController().signal);
+    const invalid = { ...draft, parsedDraft: { ...draft.parsedDraft!, games: [] } };
+    await repository.saveDraft(invalid);
+    await expect(service.confirmDraft(draft.id)).rejects.toThrow('could not be confirmed');
+    expect(await repository.getDraft(draft.id)).toEqual(invalid);
+    expect((await repository.getMatchBundle(match.match.id))?.games).toHaveLength(0);
+  });
+  it('fails closed when confirmation reports success without a durable marker', async () => {
+    const { service, match, repository } = await setup();
+    const draft = await service.createDraftFromAudio({ matchId: match.match.id, setId: match.sets[0].id, audio: new Blob(['a']), mimeType: 'audio/mp4' }, new AbortController().signal);
+    vi.spyOn(repository, 'confirmDraft').mockResolvedValueOnce({ status: 'alreadyConfirmed' });
+    await expect(service.confirmDraft(draft.id)).rejects.toMatchObject({ code: 'storage' });
+    expect((await repository.getDraft(draft.id))?.state).toBe('ready');
+  });
+  it('rejects a marker that does not match the draft binding', async () => {
+    const { service, match, repository } = await setup();
+    const draft = await service.createDraftFromAudio({ matchId: match.match.id, setId: match.sets[0].id, audio: new Blob(['a']), mimeType: 'audio/mp4' }, new AbortController().signal);
+    vi.spyOn(repository, 'confirmDraft').mockImplementationOnce(async () => {
+      vi.spyOn(repository, 'getDraftConfirmation').mockResolvedValue({ confirmationId: 'wrong', matchId: draft.matchId, confirmedAt: 'now' });
+      throw new Error('secret');
+    });
+    await expect(service.confirmDraft(draft.id)).rejects.toMatchObject({ code: 'storage' });
+    expect((await repository.getDraft(draft.id))?.state).toBe('confirming');
+  });
   it('persists audio and transcript before the respective provider calls', async () => {
     const { repository, match, transcriber, parser, service, parsed } = await setup();
     const audio = new Blob(['sound'], { type: 'audio/mp4' });

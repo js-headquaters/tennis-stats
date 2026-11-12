@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { Clock, IdGenerator, StatisticsParser, TennisRepository, TranscriptionProvider } from './ports';
 import type { DraftGame, MatchBundle, VoiceDraft } from '../domain/model';
 import { validateGame } from '../domain/validation';
-import { nextGameServer } from './matchService';
+import { nextGameServer, prepareGames } from './matchService';
 import { evaluateSet } from '../domain/scoring';
 
 type Phase = 'transcription' | 'parser';
@@ -20,6 +20,7 @@ export class DraftStorageError extends Error {
 
 export function createDraftService({ repository, transcriber, parser, clock, ids, isOnline }: Deps) {
   const busy = new Set<string>();
+  const confirmations = new Map<string, Promise<{ status: 'confirmed' | 'alreadyConfirmed'; bundle: MatchBundle }>>();
   function guard<T>(id: string, action: () => Promise<T>): Promise<T> {
     if (busy.has(id)) return Promise.reject(new Error('Draft is already processing'));
     busy.add(id);
@@ -102,5 +103,53 @@ export function createDraftService({ repository, transcriber, parser, clock, ids
       await storage(() => repository.saveDraft(next)); return next;
     });
   }
-  return { createDraftFromAudio, retryDraft, refineDraftWithAudio, updateDraftGame };
+  async function confirmed(id: string, draft?: VoiceDraft) {
+    const marker = await storage(() => repository.getDraftConfirmation(id));
+    if (!marker) return undefined;
+    if (draft && (marker.confirmationId !== draft.confirmationId || marker.matchId !== draft.matchId)) throw new DraftStorageError();
+    const bundle = await storage(() => repository.getMatchBundle(marker.matchId));
+    if (!bundle || bundle.match.id !== marker.matchId) throw new DraftStorageError();
+    return { status: 'alreadyConfirmed' as const, bundle };
+  }
+  async function performConfirmation(id: string) {
+    const draft = await storage(() => repository.getDraft(id));
+    if (!draft) {
+      const result = await confirmed(id);
+      if (result) return result;
+      throw new Error('Draft not found');
+    }
+    if ((draft.state !== 'ready' && draft.state !== 'confirming') || !draft.parsedDraft) throw new Error('Draft is not ready');
+    try {
+      await save({ ...draft, state: 'confirming', error: null });
+      const found = await applicable(draft);
+      if (found.sets.find(s => s.status === 'active')?.id !== draft.setId) throw new Error('No active standard set for draft');
+      if (!draftSchema.safeParse(draft.parsedDraft).success) throw new Error('Invalid draft games');
+      const prepared = prepareGames(found, draft.parsedDraft.games, { clock, ids });
+      const result = await storage(() => repository.confirmDraft(id, draft.confirmationId, prepared, clock.now()));
+      const durable = await confirmed(id, draft);
+      if (!durable) throw new DraftStorageError();
+      return { ...durable, status: result.status };
+    } catch (error) {
+      const durable = await confirmed(id, draft);
+      if (durable) return durable;
+      try { await save({ ...draft, state: 'ready' }); }
+      catch {
+        const raced = await confirmed(id, draft);
+        if (raced) return raced;
+        throw new DraftStorageError();
+      }
+      if (error instanceof DraftStorageError) throw error;
+      // Untrusted errors must not be exposed through Error.cause.
+      // eslint-disable-next-line preserve-caught-error
+      throw new Error('Draft could not be confirmed.');
+    }
+  }
+  function confirmDraft(id: string) {
+    const pending = confirmations.get(id);
+    if (pending) return pending;
+    const promise = guard(id, () => performConfirmation(id)).finally(() => confirmations.delete(id));
+    confirmations.set(id, promise);
+    return promise;
+  }
+  return { createDraftFromAudio, retryDraft, refineDraftWithAudio, updateDraftGame, confirmDraft };
 }

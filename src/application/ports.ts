@@ -22,6 +22,7 @@ export interface TennisRepository {
   deleteMatch(id: string): Promise<void>;
   saveDraft(draft: VoiceDraft): Promise<void>;
   getDraft(id: string): Promise<VoiceDraft | undefined>;
+  getDraftConfirmation(draftId: string): Promise<{ confirmationId: string; matchId: string; confirmedAt: string } | undefined>;
   deleteDraft(id: string): Promise<void>;
   confirmDraft(draftId: string, confirmationId: string, preparedBundle: MatchBundle, confirmedAt: string): Promise<{ status: 'confirmed' | 'alreadyConfirmed' }>;
   listOpponents(): Promise<Opponent[]>;

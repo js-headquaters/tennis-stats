@@ -26,6 +26,36 @@ async function setup() {
 function indexedDBDelete(name: string) { return new Promise<void>((resolve, reject) => { const request = indexedDB.deleteDatabase(name); request.onsuccess = () => resolve(); request.onerror = () => reject(request.error); }); }
 
 describe('IndexedDB repository', () => {
+  it('does not recreate a draft when its save is queued behind confirmation', async () => {
+    const repo = await setup(); const initial = bundle('m'); const draft = draftFixture('m');
+    await repo.saveMatchBundle(initial); await repo.saveDraft(draft);
+    const confirming = repo.confirmDraft('d', 'c', initial, 'now');
+    const saving = repo.saveDraft(draft);
+    await confirming;
+    await expect(saving).rejects.toThrow();
+    expect(await repo.getDraft('d')).toBeUndefined();
+  });
+  it('refuses draft saves with malformed or duplicate confirmation markers', async () => {
+    const name = `guard-invalid-${crypto.randomUUID()}`;
+    const db = new TennisDatabase(name); await db.open();
+    const repo = new IndexedDbTennisRepository(db, null);
+    cleanup.push(async () => { repo.close(); await indexedDBDelete(name); });
+    await repo.saveMatchBundle(bundle('m'));
+    await db.metadata.put({ key: 'draft-confirmation:c', value: 1 });
+    await expect(repo.saveDraft(draftFixture('m'))).rejects.toThrow();
+    await db.metadata.put({ key: 'draft-confirmation:c', value: { draftId: 'd', matchId: 'm', confirmedAt: 'now' } });
+    await db.metadata.put({ key: 'draft-confirmation:x', value: { draftId: 'd', matchId: 'm', confirmedAt: 'now' } });
+    await expect(repo.saveDraft(draftFixture('m'))).rejects.toThrow();
+    expect(await repo.getDraft('d')).toBeUndefined();
+  });
+  it('allows durable confirmation lookup in recovery mode', async () => {
+    const name = `lookup-recovery-${crypto.randomUUID()}`;
+    const db = new TennisDatabase(name); await db.open();
+    const repo = new IndexedDbTennisRepository(db, new Error('recovery'));
+    cleanup.push(async () => { repo.close(); await indexedDBDelete(name); });
+    await db.metadata.put({ key: 'draft-confirmation:c', value: { draftId: 'd', matchId: 'm', confirmedAt: 'now' } });
+    expect(await repo.getDraftConfirmation('d')).toEqual({ confirmationId: 'c', matchId: 'm', confirmedAt: 'now' });
+  });
   it('round trips rich draft content without changing nulls, zeroes or audio', async () => {
     const repo = await setup(); await repo.saveMatchBundle(bundle('m'));
     const draft: VoiceDraft = { ...draftFixture('m'), recording: new Blob(['audio'], { type: 'audio/mp4' }), mimeType: 'audio/mp4', transcripts: [{ text: 'first', provider: 'openai', model: 'test', timestamp: 'now' }, { text: 'second', provider: 'openai', model: 'test', timestamp: 'later' }], parsedDraft: { version: 1, warnings: ['warning'], games: [{ server: 'player', result: 'won', netErrors: 0, wideErrors: null, longErrors: null, doubleFaults: 0, failedReturns: null }] }, state: 'waiting-retry', error: { code: 'network', message: 'retry', phase: 'parser' } };
@@ -80,6 +110,28 @@ describe('IndexedDB repository', () => {
     cleanup.push(async () => { db.close(); repo.close(); await indexedDBDelete(name); });
     await db.metadata.put({ key: 'draft-confirmation:c', value: { draftId: 'd', matchId: 'm', confirmedAt: '' } });
     await expect(repo.confirmDraft('d', 'c', bundle('m'), 'now')).rejects.toThrow(/marker/i);
+  });
+  it('looks up a durable confirmation by draft after reopening', async () => {
+    const name = `lookup-${crypto.randomUUID()}`;
+    const repo = await openDatabase(name);
+    cleanup.push(async () => { repo.close(); await indexedDBDelete(name); });
+    await repo.saveMatchBundle(bundle('m')); await repo.saveDraft(draftFixture('m'));
+    expect(await repo.getDraftConfirmation('d')).toBeUndefined();
+    await repo.confirmDraft('d', 'c', bundle('m'), 'now');
+    repo.close();
+    const reopened = await openDatabase(name);
+    try { expect(await reopened.getDraftConfirmation('d')).toEqual({ confirmationId: 'c', matchId: 'm', confirmedAt: 'now' }); }
+    finally { reopened.close(); }
+  });
+  it('rejects malformed and colliding confirmation rows during lookup', async () => {
+    const name = `lookup-invalid-${crypto.randomUUID()}`;
+    const repo = await openDatabase(name); const db = new TennisDatabase(name); await db.open();
+    cleanup.push(async () => { db.close(); repo.close(); await indexedDBDelete(name); });
+    await db.metadata.put({ key: 'draft-confirmation:c', value: { draftId: 'd', matchId: 'm', confirmedAt: '' } });
+    await expect(repo.getDraftConfirmation('d')).rejects.toThrow(/marker/i);
+    await db.metadata.put({ key: 'draft-confirmation:c', value: { draftId: 'd', matchId: 'm', confirmedAt: 'now' } });
+    await db.metadata.put({ key: 'draft-confirmation:other', value: { draftId: 'd', matchId: 'm', confirmedAt: 'now' } });
+    await expect(repo.getDraftConfirmation('d')).rejects.toThrow(/marker/i);
   });
   it('rejects an empty confirmation timestamp without writing the bundle', async () => {
     const repo = await setup(); const initial = bundle('m');
