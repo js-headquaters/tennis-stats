@@ -1,13 +1,8 @@
 {
   "name": "tennis-stats",
   "version": "1.0.0",
-  "description": "",
   "private": true,
   "type": "module",
-  "directories": {
-    "doc": "docs",
-    "test": "tests"
-  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -19,17 +14,6 @@
     "verify:pwa": "node scripts/verify-pwa.mjs",
     "icons": "node scripts/generate-icons.mjs"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/js-headquaters/tennis-stats.git"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/js-headquaters/tennis-stats/issues"
-  },
-  "homepage": "https://github.com/js-headquaters/tennis-stats#readme",
   "dependencies": {
     "dexie": "^4.4.7",
     "react": "^19.3.1",

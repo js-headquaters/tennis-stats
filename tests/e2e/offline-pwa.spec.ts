@@ -1,6 +1,7 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Page } from '@playwright/test';
+import { PREVIEW_PORT } from '../../playwright.config';
 import {
   FAKE_API_KEY, FIXED_NOW, buildOpponent, buildSnapshot, configureAi, expect, installFakeMicrophone, mockAi, readDatabase,
   seedDatabase, test as base,
@@ -16,7 +17,7 @@ import {
 // own routing cannot do this: it does not see the browser's service-worker update fetches. Each test gets its own proxy
 // port, i.e. a fresh origin, so no service worker or cache leaks between tests.
 
-const UPSTREAM = { host: '127.0.0.1', port: 4174 };
+const UPSTREAM = { host: '127.0.0.1', port: PREVIEW_PORT };
 interface Proxy { origin: string; baseURL: string; publishUpdate(): void; swRequests: number }
 
 const test = base.extend<{ releaseServer: Proxy }>({

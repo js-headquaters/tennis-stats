@@ -1,6 +1,6 @@
 # Tennis Stats
 
-A mobile-first progressive web app for recording tennis matches by voice or by hand and reviewing your statistics. Speak a game description, let an AI provider turn it into structured points, review and correct the draft, then browse match history and a statistics dashboard. Manual entry, editing, history and dashboards work offline.
+A mobile-first progressive web app for recording tennis matches by voice or by hand and reviewing your statistics. Speak a game description, let an AI provider turn it into games, review and correct the draft, then browse match history and a statistics dashboard. Manual entry, editing, history and dashboards work offline.
 
 Live app: <https://js-headquaters.github.io/tennis-stats/>
 

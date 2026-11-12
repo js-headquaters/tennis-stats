@@ -7,8 +7,8 @@ import { defineConfig, devices } from '@playwright/test';
  *   per test with `test.use({ serviceWorkers: 'allow' })`.
  * - AI providers are never reached: specs mock them with `mockAi` from tests/e2e/fixtures.ts.
  */
-const PORT = 4174;
-const ORIGIN = `http://127.0.0.1:${PORT}`;
+export const PREVIEW_PORT = 4174;
+const ORIGIN = `http://127.0.0.1:${PREVIEW_PORT}`;
 const BASE_URL = `${ORIGIN}/tennis-stats/`;
 
 export default defineConfig({
@@ -29,7 +29,7 @@ export default defineConfig({
     { name: 'webkit', use: { ...devices['iPhone 15'], serviceWorkers: 'block' } },
   ],
   webServer: {
-    command: `npm run build && npm run preview -- --host 127.0.0.1 --port ${PORT} --strictPort`,
+    command: `npm run build && npm run preview -- --host 127.0.0.1 --port ${PREVIEW_PORT} --strictPort`,
     url: BASE_URL,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,

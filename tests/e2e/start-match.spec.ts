@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test';
 import type { MatchFormat } from '../../src/domain/model';
+import { PREVIEW_PORT } from '../../playwright.config';
 import { FIXED_NOW, buildMatchBundle, buildOpponent, buildSnapshot, expect, mockAi, openAppDatabase, readDatabase, seedDatabase, test } from './fixtures';
 
 // Journeys 1 (create/reuse an opponent, start each format) and 13 (deployment-base routing under /tennis-stats/).
@@ -10,6 +11,7 @@ const FORMATS: Array<{ format: MatchFormat; option: string; liveLabel: string }>
   { format: 'oneSet', option: 'One set', liveLabel: 'One set' },
   { format: 'bestOfThree', option: 'Best of three sets', liveLabel: 'Best of three sets' },
 ];
+const PREVIEW_ORIGIN = `http://127.0.0.1:${PREVIEW_PORT}`;
 
 test.beforeEach(async ({ page }) => {
   await page.clock.setFixedTime(new Date(FIXED_NOW));
@@ -83,7 +85,7 @@ test('reuses an existing opponent and starts each match format', async ({ page }
 test('direct navigation and reload work for every route under the /tennis-stats/ base', async ({ page }) => {
   const failures: string[] = [];
   page.on('response', response => { if (response.status() >= 400) failures.push(`${response.status()} ${response.url()}`); });
-  page.on('request', request => { const url = new URL(request.url()); if (url.origin === 'http://127.0.0.1:4174' && !url.pathname.startsWith('/tennis-stats/')) failures.push(`outside base: ${request.url()}`); });
+  page.on('request', request => { const url = new URL(request.url()); if (url.origin === PREVIEW_ORIGIN && !url.pathname.startsWith('/tennis-stats/')) failures.push(`outside base: ${request.url()}`); });
 
   const done = buildMatchBundle({ id: 'done-1', opponent: 'Blake Sample', status: 'completed', format: 'oneSet', sets: [{ games: 'WWWWWW', status: 'completed' }] });
   const live = buildMatchBundle({ id: 'live-1', opponent: 'Casey Test', playedAt: '2026-03-13T18:00:00.000Z', sets: [{ games: 'WL' }] });
@@ -110,9 +112,9 @@ test('direct navigation and reload work for every route under the /tennis-stats/
 
   // In-app navigation stays on the hash router under the base.
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Matches' }).click();
-  await expect(page).toHaveURL('http://127.0.0.1:4174/tennis-stats/#/matches');
+  await expect(page).toHaveURL(`${PREVIEW_ORIGIN}/tennis-stats/#/matches`);
   await page.getByRole('link', { name: 'Blake Sample' }).click();
-  await expect(page).toHaveURL('http://127.0.0.1:4174/tennis-stats/#/matches/done-1');
+  await expect(page).toHaveURL(`${PREVIEW_ORIGIN}/tennis-stats/#/matches/done-1`);
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Match against Blake Sample' })).toBeVisible();
   expect(failures).toEqual([]);

@@ -37,6 +37,7 @@ The app has no hidden diagnostics screen, and none may be added if it could show
 | Open `https://js-headquaters.github.io/tennis-stats/` and let it load fully. | The app shell and navigation render. |
 | **Safari:** Share → Add to Home Screen. **Chrome:** Share (the icon in the address bar) → Add to Home Screen. | The suggested name is "Tennis Stats", with the lime tennis-ball icon. |
 | Open the app from the Home Screen icon. | It opens full screen (standalone, with no browser bar) on the start page at `/tennis-stats/`. The status bar is readable and the header is not hidden under the notch or Dynamic Island. |
+| Open Settings → **Application**. | App version, data/schema version, Online status, installed/standalone status and offline readiness are shown. The installed app says it is running as an installed app. |
 | Turn on Airplane Mode, then force-quit the app and reopen it from the Home Screen. | The app opens from the cache. History, dashboards and manual entry work. The offline banner says AI transcription is waiting for a connection. |
 | Navigate to a deep page (a match), force-quit the app, and reopen it while still offline. | The app loads; it does not show an iOS "no connection" page. |
 
@@ -46,8 +47,8 @@ The app has no hidden diagnostics screen, and none may be added if it could show
 
 | Step | Expected |
 | --- | --- |
-| Open a match, then choose **Record voice entry** → Start recording. | iOS shows its microphone permission prompt. The app does not record anything before you allow it. |
-| Tap **Allow**, speak for about 5 seconds, then stop. | The recording is saved as a voice draft and appears under "Saved voice drafts". |
+| Open a match, then choose **Record with voice** → Start recording. | iOS shows its microphone permission prompt. The app does not record anything before you allow it. |
+| Tap **Allow**, speak for about 5 seconds, then stop. | The recording is saved before navigation. The app opens the voice-draft review page and starts transcription/parsing automatically. If you return to the recording page, the retained draft appears under **Saved voice drafts**. |
 | Reset the permission for the site:<br>• **Safari:** aA menu → Website Settings → Microphone → Ask.<br>• **Chrome:** iOS Settings → Apps → Chrome → Microphone.<br>Then start recording again and tap **Don't Allow**. | The app explains how to turn the microphone on, and offers **Manual entry**. It does not crash or hang in "requesting". |
 | Turn the microphone back on, using the same settings path, and return to the app. | Recording works again without reinstalling the app. Record whether a page reload was needed. |
 | In the installed Home Screen app, repeat Allow and Deny. | Same behaviour as in the browser. Note any difference in the prompt (iOS may ask again on each launch). |
@@ -57,7 +58,9 @@ The app has no hidden diagnostics screen, and none may be added if it could show
 | Step | Expected |
 | --- | --- |
 | After a successful recording, read the draft's `mimeType` (see "Reading diagnostics"). | An `audio/mp4` (AAC) type on iOS. Record the exact string. |
-| Process the draft while online with the test key. | Transcription succeeds; the provider accepts the format. A format error is a **fail**: record the MIME type and the message shown. |
+| Let the review page process the draft automatically while online with the test key. | Transcription succeeds; the provider accepts the format. A format error is a **fail**: record the MIME type and the message shown. |
+| While processing is active, tap **Cancel processing**. | Processing stops, the recording remains, and the draft becomes retryable. **Retry processing** can start it again. |
+| Tap **Discard draft**, then **Keep draft**; repeat and choose **Confirm discard**. | The first choice preserves the recording. The confirmed choice removes the draft and its recording without changing games already added to the match. |
 
 ## 4. Lock screen and background during recording
 
@@ -79,7 +82,8 @@ The app has no hidden diagnostics screen, and none may be added if it could show
 | Step | Expected |
 | --- | --- |
 | While offline, record a voice entry. | The draft is saved as waiting for a connection or retryable. The banner explains that transcription is waiting. |
-| Force-quit the app, turn Airplane Mode off, and reopen. | The banner shows "Back online", and the draft is still listed. |
+| Force-quit the app, turn Airplane Mode off, and reopen. | The draft is still listed. A cold online start does **not** show “Back online”; that message is only for an offline→online transition while the app is open. |
+| With the reopened app visible, go offline and then turn Airplane Mode off. | The banner briefly shows “Back online. Voice drafts that were waiting can be retried now.” |
 | Open the draft and tap **Retry processing**. Review the parsed games, then confirm. | Transcription and parsing succeed. The games are added only after you confirm, and only once (no duplicates if you tap twice). |
 
 ## 7. Backup: download and upload
@@ -99,18 +103,26 @@ Before this section, deploy a new build to the same site. Any change that alters
 | --- | --- |
 | With the app open (installed, online), wait about 1 minute, or switch away from the app and back. If nothing appears, close and reopen the app once. | "An update is available" appears with **Reload to update** and **Later**. The page does **not** reload by itself. |
 | Start a voice recording while the prompt is visible. | **Reload to update** is disabled and the reason is shown ("Finish or save your recording or draft first…"). |
-| Stop the recording and let the draft save. | **Reload to update** becomes enabled. |
-| Tap **Later**. | The prompt hides; the app keeps working on the old version. |
-| Reopen the app (or wait until the prompt shows again) and tap **Reload to update**. | The app reloads exactly once and runs the new build. All matches and drafts are still there. |
-| If the app is open in two contexts (for example, two Safari tabs), apply the update in one. | The other tab does **not** reload on its own; it shows the update prompt again. |
+| Stop the recording, let it save, and let automatic processing finish (or tap **Cancel processing**). | **Reload to update** becomes enabled. Persisted recorded/ready/waiting/error/processing/confirming drafts do not block updates by themselves; only work active in this page session does. |
+| Tap **Later**. | The prompt hides and stays dismissed while this page remains mounted; the app keeps working on the old version. |
+| Reload or reopen the app so the update prompt can appear again, then tap **Reload to update**. | The app reloads exactly once and runs the new build. All matches and drafts are still there. |
+| If the app is open in two contexts (for example, two Safari tabs), tap **Later** in one and apply the update in the other. | Neither tab reloads on its own. The tab that chose **Later** stays dismissed until it is reloaded/reopened; other contexts manage their own prompt. |
+
+## 9. Private Browsing storage failure
+
+Private Browsing can reject IndexedDB Blob writes on some iOS versions. This row verifies that a rejected save is visible and recoverable rather than silently losing audio.
+
+| Step | Expected |
+| --- | --- |
+| Open a new Private Browsing tab, start a match, choose **Record with voice**, record briefly, and stop. | If the recording saves, note that result. If storage rejects the Blob, the page says the recording could not be saved, keeps it on that page, and offers **Retry saving recording** plus **Manual entry**. It must not navigate to a nonexistent draft or claim the recording was saved. |
 
 ## Results
 
 Copy this table for each run. Mark each cell **Pass**, **Fail** or **N/A**, and explain every Fail or N/A in Notes.
 
-| Date | Tester | iPhone model | iOS version | Browser and version | Build (commit) | 1 Install | 2 Mic | 3 Format (MIME) | 4 Lock/background | 5 Offline manual | 6 Pending retry | 7 Backup | 8 Update | Notes |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| YYYY-MM-DD | | | | Safari | | | | `audio/mp4` | | | | | | |
-| YYYY-MM-DD | | | | Chrome | | | | | | | | | | |
+| Date | Tester | iPhone model | iOS version | Browser and version | Build (commit) | 1 Install | 2 Mic | 3 Format (MIME) | 4 Lock/background | 5 Offline manual | 6 Pending retry | 7 Backup | 8 Update | 9 Private | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| YYYY-MM-DD | | | | Safari | | | | `audio/mp4` | | | | | | | |
+| YYYY-MM-DD | | | | Chrome | | | | | | | | | | | |
 
 When you finish, revoke the test key and delete the site data from the test device.
