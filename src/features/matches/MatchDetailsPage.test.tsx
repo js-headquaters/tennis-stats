@@ -133,7 +133,7 @@ it('requires conflict confirmation before applying a disruptive game edit', asyn
   fireEvent.click(screen.getByRole('button', { name: 'Save game' }));
   await screen.findByRole('region', { name: /affected records/i });
   fireEvent.click(screen.getByRole('button', { name: 'Confirm affected records' }));
-  await waitFor(() => expect(set(1)).toHaveTextContent('Score 5–5 · No result · Set completed'));
+  await waitFor(() => expect(set(1)).toHaveTextContent('Score 5–5 · No result · Recorded as completed — score no longer decides the set'));
   expect((await stored(deps)).games.find(g => g.id === 's1-g1')!.result).toBe('lost');
   expect((await stored(deps)).match.status).toBe('completed');
 });

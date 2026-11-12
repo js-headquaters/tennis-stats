@@ -3,6 +3,7 @@ import { evaluateStoredSet, type SetEvaluation } from '../../domain/scoring';
 import GameCard, { tieBreakMetrics } from './GameCard';
 
 const SET_STATUS: Record<SetStatus, string> = { completed: 'Set completed', unfinished: 'Set unfinished', active: 'Set in progress' };
+const setStatusLabel = (set: TennisSet, evaluation: SetEvaluation) => set.status === 'completed' && !evaluation.completed ? 'Recorded as completed — score no longer decides the set' : SET_STATUS[set.status];
 const verdict = (winner: SetEvaluation['winner']) => winner === 'player' ? 'Won' : winner === 'opponent' ? 'Lost' : 'No result';
 
 function TieBreakSummary({ tieBreak, disabled, onEdit }: { tieBreak: TieBreak; disabled: boolean; onEdit: () => void }) {
@@ -22,7 +23,7 @@ export default function MatchSetDetails({ bundle, set, disabled, onEditGame, onD
   const score = set.kind === 'decidingSuperTiebreak' ? (tieBreak ? `${tieBreak.playerPoints}–${tieBreak.opponentPoints}` : 'No points recorded') : `${evaluation.playerGames}–${evaluation.opponentGames}`;
   return <section role="region" aria-label={`Set ${set.ordinal}`} className="match-set">
     <h2>Set {set.ordinal}{set.kind === 'decidingSuperTiebreak' && ': deciding super tie-break'}</h2>
-    <p className="set-summary">Score {score} · {verdict(evaluation.winner)} · {SET_STATUS[set.status]}</p>
+    <p className="set-summary">Score {score} · {verdict(evaluation.winner)} · {setStatusLabel(set, evaluation)}</p>
     {tieBreak && <TieBreakSummary tieBreak={tieBreak} disabled={disabled} onEdit={() => onEditTieBreak(tieBreak)} />}
     {children?.(null)}
     {set.kind === 'standard' && games.length === 0 && <p>No games recorded.</p>}

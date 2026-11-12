@@ -221,7 +221,14 @@ function correctionConflicts(before: MatchBundle, after: MatchBundle, corrected:
   return conflicts;
 }
 
-export async function updateGame(gameId: string, patch: GamePatch, { repository, clock }: MatchServiceDeps, confirmed = false): Promise<{ bundle: MatchBundle; conflicts: GameConflict[] }> {
+/** A correction that completes the active set of an active match finalises it exactly as adding the deciding game would. Other matches and sets are only edited in place. */
+function finaliseCorrectedActiveSet(bundle: MatchBundle, now: string, ids: IdGenerator) {
+  if (bundle.match.status !== 'active') return;
+  const set = bundle.sets.find(item => item.status === 'active');
+  if (set && set.kind === 'standard' && evaluateStoredSet(bundle, set).completed) completeSet(bundle, set, now, ids);
+}
+
+export async function updateGame(gameId: string, patch: GamePatch, { repository, clock, ids }: MatchServiceDeps, confirmed = false): Promise<{ bundle: MatchBundle; conflicts: GameConflict[] }> {
   const before = await findGame(gameId, repository);
   const bundle = structuredClone(before);
   const game = bundle.games.find(item => item.id === gameId)!;
@@ -233,18 +240,21 @@ export async function updateGame(gameId: string, patch: GamePatch, { repository,
   if (!valid.ok) throw new Error(valid.issues.map(issue => `${issue.field}: ${issue.message}`).join('; '));
   const conflicts = correctionConflicts(before, bundle, before.games.find(item => item.id === gameId)!);
   if (conflicts.length && !confirmed) return { bundle: before, conflicts };
+  finaliseCorrectedActiveSet(bundle, game.updatedAt, ids);
   bundle.match.updatedAt = game.updatedAt;
   await repository.saveMatchBundle(bundle);
   return { bundle, conflicts };
 }
 
-export async function deleteGame(gameId: string, { repository, clock }: MatchServiceDeps, confirmed = false): Promise<{ bundle: MatchBundle; conflicts: GameConflict[] }> {
+export async function deleteGame(gameId: string, { repository, clock, ids }: MatchServiceDeps, confirmed = false): Promise<{ bundle: MatchBundle; conflicts: GameConflict[] }> {
   const before = await findGame(gameId, repository);
   const bundle = structuredClone(before);
   bundle.games = bundle.games.filter(game => game.id !== gameId);
   const conflicts = correctionConflicts(before, bundle, before.games.find(item => item.id === gameId)!);
   if (conflicts.length && !confirmed) return { bundle: before, conflicts };
-  bundle.match.updatedAt = clock.now();
+  const now = clock.now();
+  finaliseCorrectedActiveSet(bundle, now, ids);
+  bundle.match.updatedAt = now;
   await repository.saveMatchBundle(bundle);
   return { bundle, conflicts };
 }

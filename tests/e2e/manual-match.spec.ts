@@ -250,7 +250,9 @@ test('finishes, reopens from history, reviews an early-game conflict, corrects a
   expect(stored.matches[0].status).toBe('completed');
   expect(stored.games.find(g => g.id === bundle.games[0].id)).toMatchObject({ result: 'lost', server: 'player' });
   expect(sortById(stored.games.filter(g => g.id !== bundle.games[0].id)), 'later records are not silently rewritten').toEqual(sortById(beforeConflict.games.filter(g => g.id !== bundle.games[0].id)));
-  expect(sortById(stored.sets), 'set rows are not rewritten by a game correction').toEqual(sortById(beforeConflict.sets));
+  expect(stored.sets.length, 'no sets are created or removed by the correction').toBe(beforeConflict.sets.length);
+  expect(sortById(stored.sets).map(set => set.id), 'set rows keep their identity').toEqual(sortById(beforeConflict.sets).map(set => set.id));
+  await expect(set1).toContainText('Recorded as completed — score no longer decides the set');
 
   // The recalculated result is what history shows after a reload.
   await page.goto('#/matches');

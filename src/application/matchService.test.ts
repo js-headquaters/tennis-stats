@@ -149,6 +149,51 @@ describe('match services', () => {
     expect(confirmed.bundle.games.slice(1).map(g => g.server)).toEqual(completed.games.slice(1).map(g => g.server));
     expect(confirmed.bundle.tieBreaks).toEqual(completed.tieBreaks);
   });
+  describe('corrections that complete the active set', () => {
+    const metrics = { netErrors: null, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null };
+    const alternate = (n: number) => Array.from({ length: n }, (_, i) => ({ ...metrics, result: i % 2 ? 'lost' as const : 'won' as const }));
+    it('previews, then finalises the set and creates the next set exactly like addGames', async () => {
+      const deps = await setup(); const initial = await startMatch(input, deps);
+      const added = await addGames(initial.match.id, alternate(10), deps);
+      expect(added.sets.map(s => s.status)).toEqual(['active']);
+      const save = vi.spyOn(deps.repository, 'saveMatchBundle');
+      const preview = await updateGame(added.games[1].id, { result: 'won' }, deps);
+      expect(preview.conflicts.length).toBeGreaterThan(0);
+      expect(save).not.toHaveBeenCalled();
+      expect(preview.bundle.sets.map(s => s.status)).toEqual(['active']);
+      const confirmed = await updateGame(added.games[1].id, { result: 'won' }, deps, true);
+      expect(save).toHaveBeenCalledTimes(1);
+      expect(confirmed.bundle.sets.map(s => [s.ordinal, s.kind, s.status])).toEqual([[1, 'standard', 'completed'], [2, 'standard', 'active']]);
+      expect(confirmed.bundle.match.status).toBe('active');
+      expect(await deps.repository.getMatchBundle(initial.match.id)).toEqual(confirmed.bundle);
+    });
+    it('completes the match when the format says so, and also via deleteGame', async () => {
+      const deps = await setup(); const initial = await startMatch({ ...input, format: 'oneSet' }, deps);
+      const added = await addGames(initial.match.id, [...Array.from({ length: 5 }, () => ({ ...metrics, result: 'won' as const })), ...Array.from({ length: 5 }, () => ({ ...metrics, result: 'lost' as const })), { ...metrics, result: 'won' as const }], deps);
+      expect(added.sets[0].status).toBe('active');
+      const confirmed = await deleteGame(added.games[5].id, deps, true);
+      expect(confirmed.bundle.sets.map(s => s.status)).toEqual(['completed']);
+      expect(confirmed.bundle.match.status).toBe('completed');
+      expect(await deps.repository.getActiveMatch()).toBeUndefined();
+    });
+    it('creates a deciding super tie-break set when sets split', async () => {
+      const deps = await setup(); const initial = await startMatch(input, deps);
+      await addGames(initial.match.id, Array.from({ length: 6 }, () => ({ ...metrics, result: 'won' as const })), deps);
+      const added = await addGames(initial.match.id, [...Array.from({ length: 5 }, () => ({ ...metrics, result: 'lost' as const })), ...Array.from({ length: 4 }, () => ({ ...metrics, result: 'won' as const }))], deps);
+      const confirmed = await updateGame(added.games[6 + 5].id, { result: 'lost' }, deps, true);
+      expect(confirmed.bundle.sets.map(s => [s.kind, s.status])).toEqual([['standard', 'completed'], ['standard', 'completed'], ['decidingSuperTiebreak', 'active']]);
+    });
+    it('never reactivates or adds sets to a finished match', async () => {
+      const deps = await setup(); const initial = await startMatch({ ...input, format: 'oneSet' }, deps);
+      const added = await addGames(initial.match.id, [...Array.from({ length: 6 }, () => ({ ...metrics, result: 'won' as const }))], deps);
+      expect(added.match.status).toBe('completed');
+      const edited = await updateGame(added.games[0].id, { netErrors: 1 }, deps);
+      expect(edited.bundle.match.status).toBe('completed');
+      const after = await deps.repository.getMatchBundle(initial.match.id);
+      expect(after!.sets).toHaveLength(1);
+      expect(after!.match.status).toBe('completed');
+    });
+  });
   it('rejects a mismatched tie-break reference without saving', async () => {
     const deps = await setup(); const initial = await startMatch(input, deps);
     const altered = structuredClone(initial); altered.sets[0].tieBreakId = 'other-tie';
