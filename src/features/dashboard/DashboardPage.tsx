@@ -11,12 +11,24 @@ const HISTORY_LENGTH = 6;
 const RECENT_LIMIT = 5;
 const STATUS_LABEL: Record<MatchStatus, string> = { active: 'In progress', completed: 'Completed', abandoned: 'Abandoned' };
 
-interface Loaded { active: MatchBundle | undefined; bundles: MatchBundle[] }
+interface Loaded { active: MatchBundle | undefined; activeFailed: boolean; bundles: MatchBundle[] | undefined; skipped: number }
 
+async function loadBundles(repository: TennisRepository) {
+  const matches = await repository.listMatches();
+  const results = await Promise.allSettled(matches.map(match => repository.getMatchBundle(match.id)));
+  const bundles = results.flatMap(result => result.status === 'fulfilled' && result.value ? [result.value] : []);
+  return { bundles, skipped: results.filter(result => result.status === 'rejected').length };
+}
+
+/** The active match loads independently so a broken statistics load (or one corrupt bundle) cannot hide the resume path. */
 async function loadDashboard(repository: TennisRepository): Promise<Loaded> {
-  const [active, matches] = await Promise.all([repository.getActiveMatch(), repository.listMatches()]);
-  const bundles = await Promise.all(matches.map(match => repository.getMatchBundle(match.id)));
-  return { active, bundles: bundles.filter((bundle): bundle is MatchBundle => bundle !== undefined) };
+  const [active, statistics] = await Promise.allSettled([repository.getActiveMatch(), loadBundles(repository)]);
+  return {
+    active: active.status === 'fulfilled' ? active.value : undefined,
+    activeFailed: active.status === 'rejected',
+    bundles: statistics.status === 'fulfilled' ? statistics.value.bundles : undefined,
+    skipped: statistics.status === 'fulfilled' ? statistics.value.skipped : 0,
+  };
 }
 
 function playedAtTime(bundle: MatchBundle) {
@@ -48,25 +60,29 @@ export default function DashboardPage({ repository, clock }: { repository?: Tenn
   }, [repository, attempt]);
 
   const view = useMemo(() => {
-    if (!data) return undefined;
+    if (!data?.bundles) return undefined;
+    const bundles = data.bundles;
     const selected = periodAt(reference, unit, offset);
-    const summary = calculateDashboard(gamesPlayedInRange(data.bundles, selected), gamesPlayedInRange(data.bundles, previousPeriod(selected, unit)));
+    const summary = calculateDashboard(gamesPlayedInRange(bundles, selected), gamesPlayedInRange(bundles, previousPeriod(selected, unit)));
     const ranges = Array.from({ length: HISTORY_LENGTH }, (_, index) => periodAt(reference, unit, offset - (HISTORY_LENGTH - 1 - index)));
-    const historyGames = ranges.map(range => gamesPlayedInRange(data.bundles, range));
+    const historyGames = ranges.map(range => gamesPlayedInRange(bundles, range));
     const history = Object.fromEntries(RECORDED_METRICS.map(key => [key, ranges.map((range, index) => {
       const { average, sampleSize } = calculateMetric(historyGames[index], key);
       return { label: periodLabel(range, unit), shortLabel: shortPeriodLabel(range, unit), average, sampleSize };
     })]));
-    const recent = [...data.bundles].sort((a, b) => playedAtTime(b) - playedAtTime(a)).slice(0, RECENT_LIMIT);
+    const recent = [...bundles].sort((a, b) => playedAtTime(b) - playedAtTime(a)).slice(0, RECENT_LIMIT);
     return { label: periodLabel(selected, unit), summary, history, recent };
   }, [data, reference, unit, offset]);
 
   function chooseUnit(next: PeriodUnit) { setUnit(next); setOffset(0); }
-  function retry() { setFailed(false); setAttempt(value => value + 1); }
+  function retry() { setFailed(false); setData(undefined); setAttempt(value => value + 1); }
 
+  const statisticsFailed = failed || (data !== undefined && data.bundles === undefined);
   return <section className="dashboard"><h1>Home</h1>
+    {data?.activeFailed && <div><p role="alert">Unable to load the active match.</p><button type="button" onClick={retry}>Retry active match</button></div>}
+    {data?.active && <section aria-label="Active match" className="resume-card"><h2>Match in progress</h2><p>Against {data.active.opponent.name}</p><Link className="action-link" to={`/matches/${data.active.match.id}/live`}>Resume match</Link></section>}
     <section aria-labelledby="statistics-heading" className="dashboard-statistics"><h2 id="statistics-heading">Statistics</h2>
-      {failed ? <div><p role="alert">Unable to load statistics.</p><button type="button" onClick={retry}>Retry</button></div>
+      {statisticsFailed ? <div><p role="alert">Unable to load statistics.</p><button type="button" onClick={retry}>Retry</button></div>
         : !view ? <p>Loading statistics…</p>
         : <>
           <div className="period-units" role="group" aria-label="Period type">
@@ -77,12 +93,12 @@ export default function DashboardPage({ repository, clock }: { repository?: Tenn
             <h3 aria-live="polite">{view.label}</h3>
             <button type="button" disabled={offset >= 0} onClick={() => setOffset(value => Math.min(0, value + 1))}>Next {unit}</button>
           </div>
+          {data!.skipped > 0 && <p role="status">{data!.skipped === 1 ? '1 match could not be loaded and is not included.' : `${data!.skipped} matches could not be loaded and are not included.`}</p>}
           <div className="metric-cards">
             {RECORDED_METRICS.map(key => <MetricCard key={key} metric={key} unit={unit} comparison={view.summary.metrics[key]} history={view.history[key]} />)}
           </div>
         </>}
     </section>
-    {data?.active && <section aria-label="Active match" className="resume-card"><h2>Match in progress</h2><p>Against {data.active.opponent.name}</p><Link className="action-link" to={`/matches/${data.active.match.id}/live`}>Resume match</Link></section>}
     {view && <section aria-labelledby="recent-heading" className="recent-matches"><h2 id="recent-heading">Recent matches</h2>
       {view.recent.length === 0 ? <p>No matches recorded yet.</p> : <ul>{view.recent.map(({ match, opponent }) => <li key={match.id}>
         <Link className="touch-link" to={`/matches/${match.id}`}>{opponent.name}</Link>

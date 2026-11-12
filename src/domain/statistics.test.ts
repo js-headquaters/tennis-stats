@@ -66,6 +66,17 @@ describe('gamesPlayedInRange', () => {
     bad.match.playedAt = 'nope';
     expect(gamesPlayedInRange([b, bad], range)).toEqual([]);
   });
+  it('excludes tie-breaks with nonzero errors from averages and sample sizes', () => {
+    const range = getCalendarPeriod(local(2026, 11, 11), 'week');
+    const b = bundle(local(2026, 11, 10), [game({ server: 'player', netErrors: 1, wideErrors: 0, longErrors: 2, doubleFaults: 0 }), game({ server: 'opponent', netErrors: 1, failedReturns: 1 })]);
+    b.tieBreaks = [{ id: 'tb', setId: 's1', kind: 'super', playerPoints: 10, opponentPoints: 8, netErrors: 9, wideErrors: 7, longErrors: 5, doubleFaults: 3, createdAt: '', updatedAt: '' }];
+    const d = calculateDashboard(gamesPlayedInRange([b], range), []);
+    expect(d.metrics.netErrors.current).toEqual({ key: 'netErrors', average: 1, sampleSize: 2 });
+    expect(d.metrics.wideErrors.current).toEqual({ key: 'wideErrors', average: 0, sampleSize: 1 });
+    expect(d.metrics.longErrors.current).toEqual({ key: 'longErrors', average: 2, sampleSize: 1 });
+    expect(d.metrics.doubleFaults.current).toEqual({ key: 'doubleFaults', average: 0, sampleSize: 1 });
+    expect(d.metrics.failedReturns.current).toEqual({ key: 'failedReturns', average: 1, sampleSize: 1 });
+  });
 });
 
 describe('calculateMetric', () => {

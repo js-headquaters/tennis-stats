@@ -24,7 +24,9 @@ it('shows a prominent resume card and keeps the start action when a match is act
   const card = await screen.findByRole('region', { name: 'Active match' });
   const statistics = screen.getByRole('region', { name: 'Statistics' });
   expect(within(statistics).getByRole('heading', { name: 'Statistics' })).toBeInTheDocument();
-  expect(statistics.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  // The resume path comes first (prominent) and the statistics are still fully rendered, not replaced.
+  expect(card.compareDocumentPosition(statistics) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(await within(statistics).findAllByRole('article')).toHaveLength(5);
   expect(within(card).getByRole('heading', { name: 'Match in progress' })).toBeInTheDocument();
   expect(within(card).getByText('Against Alex')).toBeInTheDocument();
   expect(within(card).getByRole('link', { name: 'Resume match' })).toHaveAttribute('href', '/matches/match-1/live');
@@ -229,4 +231,36 @@ it('gives controls 44px touch targets and keeps the start action floating', asyn
     }
     expect(getComputedStyle(screen.getByRole('link', { name: 'Start new match' })).position).toBe('fixed');
   } finally { style.remove(); }
+});
+
+it('shows the resume card and remaining statistics when one match bundle fails to load', async () => {
+  const repository = fakeRepository(fixtures);
+  repository.getMatchBundle.mockImplementation(async (id: string) => {
+    if (id === 'blake') throw new Error('corrupt');
+    return fixtures.find(b => b.match.id === id);
+  });
+  show(repository);
+  await screen.findByRole('heading', { name: '9–15 Nov 2026' });
+  expect(within(screen.getByRole('region', { name: 'Active match' })).getByText('Against Drew')).toBeInTheDocument();
+  expect(value('Net errors', 'Average')).toHaveTextContent(/^1$/);
+  expect(value('Net errors', 'Trend')).toHaveTextContent('No comparison: no recorded games in the previous week');
+  expect(screen.getByRole('status')).toHaveTextContent('1 match could not be loaded and is not included.');
+});
+
+it('shows the resume card even when the match list fails to load', async () => {
+  const repository = fakeRepository(fixtures);
+  repository.listMatches.mockRejectedValue(new Error('broken index'));
+  show(repository);
+  expect(await screen.findByRole('alert')).toHaveTextContent('Unable to load statistics.');
+  expect(within(screen.getByRole('region', { name: 'Active match' })).getByRole('link', { name: 'Resume match' })).toHaveAttribute('href', '/matches/drew/live');
+  expect(screen.getByRole('link', { name: 'Start new match' })).toBeInTheDocument();
+});
+
+it('keeps statistics when only the active match fails to load', async () => {
+  const repository = fakeRepository(fixtures);
+  repository.getActiveMatch.mockRejectedValue(new Error('broken'));
+  show(repository);
+  await screen.findByRole('heading', { name: '9–15 Nov 2026' });
+  expect(screen.getByRole('alert')).toHaveTextContent('Unable to load the active match.');
+  expect(value('Net errors', 'Average')).toHaveTextContent(/^1$/);
 });
