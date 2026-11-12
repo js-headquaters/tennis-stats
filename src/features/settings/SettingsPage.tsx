@@ -30,6 +30,6 @@ export default function SettingsPage({ store = createLocalSettings(localStorage)
     <AiSettingsSection title="Transcription" kind="transcription" initial={store.getTranscription()} save={value => store.saveTranscription(value as TranscriptionSettings)} clear={() => store.clear('transcription')} testConnection={testConnection} pending={pending} acquire={acquire} release={release} />
     <AiSettingsSection title="Statistics parser" kind="parser" initial={store.getParser()} save={value => store.saveParser(value)} clear={() => store.clear('parser')} testConnection={testConnection} pending={pending} acquire={acquire} release={release} />
     <DataSettingsSection deps={data} pending={pending} acquire={acquire} release={release} />
-    <ApplicationSection repository={data?.repository} {...application} />
+    <ApplicationSection {...application} />
   </>;
 }
