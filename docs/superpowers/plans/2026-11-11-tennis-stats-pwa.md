@@ -519,23 +519,23 @@ Run `git add tests playwright.config.ts src && git commit -m "test: cover critic
 **Interfaces:**
 - Produces: required CI checks on pushes/PRs and Pages deployment only from `develop` after checks pass.
 
-- [ ] **Step 1: Write CI workflow checks**
+- [x] **Step 1: Write CI workflow checks**
 
 On pull requests and pushes, use Node 22 with `npm ci`, run `npx playwright install --with-deps chromium webkit`, then run typecheck, lint, unit/integration tests, production build, and Playwright smoke. Upload Playwright artifacts only on failure.
 
-- [ ] **Step 2: Write Pages workflow**
+- [x] **Step 2: Write Pages workflow**
 
 Trigger on successful CI for `develop` (plus manual dispatch), upload `dist`, and deploy with GitHub's Pages actions and least-privilege permissions. Do not deploy a failing commit.
 
-- [ ] **Step 3: Document local and deployment workflows**
+- [x] **Step 3: Document local and deployment workflows**
 
 In `README.md`, document setup, scripts, GitHub Pages URL, local-only data/key warning, backup recommendation, and the iPhone smoke-test link without including credentials.
 
-- [ ] **Step 4: Run the complete local release gate**
+- [x] **Step 4: Run the complete local release gate**
 
 Run `npm ci && npm run typecheck && npm run lint && npm test && npm run build && npm run test:e2e -- --grep @smoke --project=chromium --project=webkit`; expect all commands to exit 0.
 
-- [ ] **Step 5: Inspect secrets and generated assets**
+- [x] **Step 5: Inspect secrets and generated assets**
 
 Run repository searches for `sk-`, `Authorization: Bearer`, and known test sentinel values; expect no real credentials. Confirm `dist/manifest.webmanifest`, asset URLs, and service-worker scope use `/tennis-stats/`.
 
