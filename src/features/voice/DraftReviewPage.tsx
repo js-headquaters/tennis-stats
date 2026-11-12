@@ -6,14 +6,14 @@ import type { TennisRepository } from '../../application/ports';
 import type { DraftGame, VoiceDraft } from '../../domain/model';
 import type { AudioRecorder } from '../../infrastructure/audio/mediaRecorder';
 import DraftGameCard from './DraftGameCard';
-import { useWorkHold } from '../../app/workGuard';
+import { useWorkHold, workRegistry } from '../../app/workGuard';
 import ReadOnlyNotice from '../../components/ReadOnlyNotice';
 
 type Service = ReturnType<typeof dependencies.createDraftService>;
 type Scheduler = { schedule(action: () => void, delay: number): () => void };
 const defaultScheduler: Scheduler = { schedule(action, delay) { const id = setTimeout(action, delay); return () => clearTimeout(id); } };
 type Props = { repository?: TennisRepository; createService?: (repository: TennisRepository) => Pick<Service, 'retryDraft' | 'refineDraftWithAudio' | 'updateDraftGame' | 'confirmDraft' | 'discardDraft'>; createRecorder?: () => AudioRecorder; scheduler?: Scheduler };
-const providerMessages: Record<string, string> = { offline:'Waiting for an internet connection.', config:'Provider configuration is invalid.', auth:'Provider authentication failed.', rate:'Provider rate limit reached.', network:'Provider network request failed.', 'invalid-response':'Provider returned an invalid response.', cancelled:'Provider request was cancelled.' };
+const providerMessages: Record<string, string> = { offline:'Waiting for an internet connection.', config:'Provider configuration is invalid.', auth:'Provider authentication failed.', rate:'Provider rate limit reached.', network:'Provider network request failed.', 'invalid-response':'Provider returned an invalid response.', cancelled:'Processing cancelled.', timeout:'Provider request timed out.' };
 const recorderMessages: Record<string, string> = { permission:'Microphone permission was denied or unavailable. Allow microphone access for this site in your browser or device settings, then try again, or use manual entry.', unsupported:'Audio recording or its format is not supported on this device.', empty:'The recording was empty. Please try again.', failed:'Recording failed. Please try again.', start:'Recording could not start. Please try again.' };
 function safeCode(error: unknown) { try { return typeof (error as { code?: unknown })?.code === 'string' ? (error as { code: string }).code : ''; } catch { return ''; } }
 function messageFor(messages: Record<string, string>, code: string, fallback: string) { return Object.hasOwn(messages, code) ? messages[code] : fallback; }
@@ -32,7 +32,7 @@ function ReviewContent({ draftId, repository, createService = dependencies.creat
   function dirtyChanged(index: number, value: boolean) { const next = new Set(dirtyRef.current); if (value) next.add(index); else next.delete(index); dirtyRef.current = next; setDirty(next); }
   // In-flight recording/processing/confirmation and unsaved game edits would be lost by a reload, so they block app updates.
   useWorkHold(!!operation || dirty.size > 0);
-  const alive = useRef(true); const lock = useRef(false); const generation = useRef(0); const recorder = useRef<AudioRecorder | null>(null); const timer = useRef<(() => void) | undefined>(undefined); const abort = useRef<AbortController | null>(null);
+  const alive = useRef(true); const lock = useRef(false); const generation = useRef(0); const recorder = useRef<AudioRecorder | null>(null); const timer = useRef<(() => void) | undefined>(undefined); const abort = useRef<AbortController | null>(null); const inflight = useRef<Promise<void> | null>(null);
   useEffect(() => {
     alive.current = true; let cancelled = false; let owned: TennisRepository | undefined;
     const close = () => { const repo = owned; owned = undefined; repo?.close(); };
@@ -59,13 +59,20 @@ function ReviewContent({ draftId, repository, createService = dependencies.creat
       } catch { close(); if (!cancelled) { setLoadError('Could not load draft. Please try again.'); setLoading(false); } }
     }
     void load();
-    return () => { cancelled = true; alive.current = false; generation.current++; timer.current?.(); abort.current?.abort(); void recorder.current?.cancel().catch(() => {}); recorder.current = null; close(); };
+    return () => { cancelled = true; alive.current = false; generation.current++; timer.current?.(); abort.current?.abort(); void recorder.current?.cancel().catch(() => {}); recorder.current = null;
+      // An owned repository is closed only after an in-flight provider call has settled and persisted its retryable state.
+      const pending = inflight.current; if (pending) void pending.then(close); else close(); };
   }, [repository, createService, draftId, attempt, navigate]);
   // Read-only recovery mode: every draft write is refused, so recording, processing and confirming are disabled.
   const readOnly = loaded?.repo.getRecoveryStatus().mode === 'readOnly';
   function begin(name: string) { if (lock.current || !loaded || readOnly) return false; lock.current = true; setOperation(name); setError(''); return true; }
   function finish() { lock.current = false; setOperation(''); }
-  async function refresh() { if (!loaded) return; try { const draft = await loaded.repo.getDraft(draftId); if (alive.current && draft) setLoaded({ ...loaded, draft }); } catch { /* Keep the last known persisted draft. */ } }
+  /** Tracks an in-flight provider call: it holds the work registry until it settles and defers closing an owned repository. */
+  function track<T>(run: Promise<T>): Promise<T> {
+    const release = workRegistry.hold(); const settled: Promise<void> = run.then(() => {}, () => {}).finally(() => { release(); if (inflight.current === settled) inflight.current = null; });
+    inflight.current = settled; return run;
+  }
+  async function refresh() { if (!loaded || !alive.current) return; try { const draft = await loaded.repo.getDraft(draftId); if (alive.current && draft) setLoaded({ ...loaded, draft }); } catch { /* Keep the last known persisted draft. */ } }
   /** Handles a failed apply action: a draft that no longer fits the match gets its explanation instead of a generic error. */
   function failed(e: unknown, fallback: string) { if (safeCode(e) === 'not-applicable') setStale(true); else setError(fallback); }
   async function update(index: number, patch: Partial<DraftGame>) {
@@ -75,7 +82,7 @@ function ReviewContent({ draftId, repository, createService = dependencies.creat
   }
   async function retry() {
     if (!loaded || dirtyRef.current.size || !begin('processing')) return; const controller = new AbortController(); abort.current = controller;
-    try { const draft = await loaded.service.retryDraft(draftId, controller.signal); if (alive.current) setLoaded({ ...loaded, draft }); }
+    try { const draft = await track(loaded.service.retryDraft(draftId, controller.signal)); if (alive.current) setLoaded({ ...loaded, draft }); }
     catch (e) { await refresh(); if (alive.current) failed(e, 'Could not retry the draft. Previously saved recordings may still be available.'); }
     finally { if (alive.current) finish(); }
   }
@@ -98,7 +105,7 @@ function ReviewContent({ draftId, repository, createService = dependencies.creat
   }
   async function stop() {
     if (!loaded || !recorder.current || operationRef.current !== 'recording') return; const token = generation.current; operationRef.current = 'stopping'; timer.current?.(); timer.current = undefined; setOperation('stopping');
-    try { const audio = await recorder.current.stop(); if (!alive.current || token !== generation.current) return; recorder.current = null; if (!audio.blob.size) throw { code:'empty' }; setOperation('processing'); const controller = new AbortController(); abort.current = controller; const draft = await loaded.service.refineDraftWithAudio(draftId, { audio:audio.blob, mimeType:audio.mimeType }, controller.signal); if (alive.current && token === generation.current) setLoaded({ ...loaded, draft }); }
+    try { const audio = await recorder.current.stop(); if (!alive.current || token !== generation.current) return; recorder.current = null; if (!audio.blob.size) throw { code:'empty' }; setOperation('processing'); const controller = new AbortController(); abort.current = controller; const draft = await track(loaded.service.refineDraftWithAudio(draftId, { audio:audio.blob, mimeType:audio.mimeType }, controller.signal)); if (alive.current && token === generation.current) setLoaded({ ...loaded, draft }); }
     catch (e) { await refresh(); if (alive.current && token === generation.current) { if (safeCode(e) === 'not-applicable') setStale(true); else setError(messageFor(recorderMessages, safeCode(e), 'Could not process recording. Previously saved recordings may still be available.')); } }
     finally { if (alive.current && token === generation.current) finish(); }
   }
@@ -111,6 +118,7 @@ function ReviewContent({ draftId, repository, createService = dependencies.creat
     autoProcessed.current = true; void retry();
   }, [loaded, readOnly, stale]);
   async function cancel() { const token = ++generation.current; timer.current?.(); timer.current = undefined; abort.current?.abort(); const current = recorder.current; recorder.current = null; try { await current?.cancel(); } catch { /* Safe cancellation. */ } if (alive.current && token === generation.current) { setError(''); finish(); } }
+  function cancelProcessing() { abort.current?.abort(); }
   const draft = loaded?.draft; const busy = !!operation; const blocked = busy || readOnly || stale;
   const state = operation === 'processing' ? 'Processing draft…' : operation === 'confirming' ? 'Confirming draft…' : operation === 'recording' ? 'Recording…' : operation === 'requesting' ? 'Requesting microphone permission…' : operation === 'stopping' ? 'Stopping recording…' : operation === 'saving' ? 'Saving game…' : operation === 'discarding' ? 'Discarding draft…' : draft?.state === 'waiting-retry' ? 'Waiting to retry.' : draft?.state === 'processing' ? 'Processing draft…' : draft?.state === 'confirming' ? 'Confirming draft…' : draft?.state === 'ready' ? 'Ready for review.' : 'Draft needs attention.';
   const discardControls = <div className="draft-discard">
@@ -136,6 +144,7 @@ function ReviewContent({ draftId, repository, createService = dependencies.creat
         {draft.state === 'confirming' && <button disabled={blocked || !!dirty.size || !draft.parsedDraft?.games.length} onClick={() => void confirm()}>Resume confirmation</button>}
         <h2>Add or correct by voice</h2><p>Record up to two minutes. Recording stops automatically at the limit.</p>
         {!['requesting', 'recording', 'stopping'].includes(operation) && <button disabled={blocked || !!dirty.size} onClick={() => void start()}>Start recording</button>}
+        {operation === 'processing' && <button onClick={cancelProcessing}>Cancel processing</button>}
         {operation === 'recording' && <button onClick={() => void stop()}>Stop recording</button>}
         {['requesting', 'recording', 'stopping'].includes(operation) && <button onClick={() => void cancel()}>Cancel recording</button>}
         <p><button disabled={blocked || !!dirty.size || draft.state !== 'ready' || !draft.parsedDraft?.games.length} onClick={() => void confirm()}>Confirm and add</button></p>

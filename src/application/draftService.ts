@@ -7,12 +7,17 @@ import { evaluateSet } from '../domain/scoring';
 import { isReadOnlyRecoveryError } from './recovery';
 
 type Phase = 'transcription' | 'parser';
-type Deps = { repository: TennisRepository; transcriber: TranscriptionProvider; parser: StatisticsParser; clock: Clock; ids: IdGenerator; isOnline: () => boolean };
+type Deps = { repository: TennisRepository; transcriber: TranscriptionProvider; parser: StatisticsParser; clock: Clock; ids: IdGenerator; isOnline: () => boolean; requestTimeoutMs?: number; scheduler?: Scheduler };
+/** Schedules `action` after `delay` ms and returns an idempotent function that cancels it. */
+export type Scheduler = { schedule(action: () => void, delay: number): () => void };
+const defaultScheduler: Scheduler = { schedule(action, delay) { const id = setTimeout(action, delay); return () => clearTimeout(id); } };
+/** Upper bound for a single transcription or parsing request. */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
 type AudioInput = { audio: Blob; mimeType: string };
 const metric = z.number().int().nonnegative().nullable();
 const gameSchema = z.object({ server: z.enum(['player', 'opponent']), result: z.enum(['won', 'lost']), netErrors: metric, wideErrors: metric, longErrors: metric, doubleFaults: metric, failedReturns: metric }).strict().refine(g => g.server === 'player' ? g.failedReturns === null : g.doubleFaults === null);
 const draftSchema = z.object({ version: z.literal(1), games: z.array(gameSchema), warnings: z.array(z.string()) }).strict();
-const messages = { auth: 'Provider authentication failed.', rate: 'Provider rate limit reached.', network: 'Provider network request failed.', config: 'Provider configuration is invalid.', 'invalid-response': 'Provider returned an invalid response.', cancelled: 'Provider request was cancelled.', offline: 'Waiting for an internet connection.' } as const;
+const messages = { auth: 'Provider authentication failed.', rate: 'Provider rate limit reached.', network: 'Provider network request failed.', config: 'Provider configuration is invalid.', 'invalid-response': 'Provider returned an invalid response.', cancelled: 'Processing cancelled.', timeout: 'Provider request timed out.', offline: 'Waiting for an internet connection.' } as const;
 
 export class DraftStorageError extends Error {
   readonly code = 'storage';
@@ -33,7 +38,7 @@ export function draftFitsMatch(bundle: MatchBundle | undefined, draft: Pick<Voic
   return !(score.completed || (score.playerGames === 6 && score.opponentGames === 6));
 }
 
-export function createDraftService({ repository, transcriber, parser, clock, ids, isOnline }: Deps) {
+export function createDraftService({ repository, transcriber, parser, clock, ids, isOnline, requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, scheduler = defaultScheduler }: Deps) {
   const busy = new Set<string>();
   const confirmations = new Map<string, Promise<{ status: 'confirmed' | 'alreadyConfirmed'; bundle: MatchBundle }>>();
   function guard<T>(id: string, action: () => Promise<T>): Promise<T> {
@@ -56,6 +61,24 @@ export function createDraftService({ repository, transcriber, parser, clock, ids
     if (draft.state === 'confirming') throw new Error('Draft is confirming');
     return draft;
   }
+  /**
+   * Runs one provider call bounded by the timeout and the caller's signal. The provider gets its own signal; whichever of
+   * timeout/cancel comes first aborts it and settles this call even if the provider ignores the signal (a late settlement is dropped).
+   */
+  async function bounded<T>(signal: AbortSignal, call: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    if (signal.aborted) throw { code: 'cancelled' };
+    const inner = new AbortController();
+    let stop!: (reason: unknown) => void;
+    const stopped = new Promise<never>((_, reject) => { stop = reject; });
+    const onAbort = () => { inner.abort(); stop({ code: 'cancelled' }); };
+    signal.addEventListener('abort', onAbort, { once: true });
+    const cancelTimer = scheduler.schedule(() => { inner.abort(); stop({ code: 'timeout' }); }, requestTimeoutMs);
+    try {
+      const running = Promise.resolve().then(() => call(inner.signal));
+      running.catch(() => {});
+      return await Promise.race([running, stopped]);
+    } finally { cancelTimer(); signal.removeEventListener('abort', onAbort); }
+  }
   async function process(draft: VoiceDraft, phase: Phase, signal: AbortSignal) {
     const bundle = await applicable(draft);
     if (!isOnline()) {
@@ -76,7 +99,8 @@ export function createDraftService({ repository, transcriber, parser, clock, ids
       let transcript;
       try {
         if (!current.recording || !current.mimeType) throw new Error('Missing audio');
-        transcript = await transcriber.transcribe({ audio: current.recording, mimeType: current.mimeType }, signal);
+        const input = { audio: current.recording, mimeType: current.mimeType };
+        transcript = await bounded(signal, inner => transcriber.transcribe(input, inner));
         if (!transcript || typeof transcript.text !== 'string' || !transcript.text.trim() || typeof transcript.provider !== 'string' || typeof transcript.model !== 'string') throw { code: 'invalid-response' };
       } catch (error) { return providerFailure(error, 'transcription'); }
       current = await save({ ...current, transcripts: [...current.transcripts, { text: transcript.text, provider: transcript.provider, model: transcript.model, timestamp: clock.now() }] });
@@ -85,7 +109,7 @@ export function createDraftService({ repository, transcriber, parser, clock, ids
     try {
       const transcript = current.transcripts.at(-1);
       if (!transcript) throw { code: 'invalid-response' };
-      const response = await parser.parse({ transcript: transcript.text, matchContext: bundle, expectedNext: nextGameServer(bundle), ...(current.parsedDraft ? { existingDraft: current.parsedDraft } : {}) }, signal);
+      const response = await bounded(signal, inner => parser.parse({ transcript: transcript.text, matchContext: bundle, expectedNext: nextGameServer(bundle), ...(current.parsedDraft ? { existingDraft: current.parsedDraft } : {}) }, inner));
       const validated = draftSchema.safeParse(response);
       if (!validated.success) throw { code: 'invalid-response' };
       parsed = validated.data;

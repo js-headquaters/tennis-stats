@@ -7,6 +7,11 @@ import { createDraftService } from './draftService';
 import type { StatisticsParser, TranscriptionProvider } from './ports';
 import { ReadOnlyRecoveryError } from './recovery';
 
+type Timer = { fire: () => void; delay: number; cleared: boolean };
+function manualScheduler() {
+  const timers: Timer[] = [];
+  return { timers, schedule(action: () => void, delay: number) { const timer: Timer = { fire: () => { if (!timer.cleared) action(); }, delay, cleared: false }; timers.push(timer); return () => { timer.cleared = true; }; } };
+}
 const clock = { now: () => '2026-01-01T00:00:00.000Z' };
 let n = 0;
 async function setup() {
@@ -18,10 +23,62 @@ async function setup() {
   const parsed = { version: 1 as const, games: [{ server: 'player' as const, result: 'won' as const, netErrors: 0, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null }], warnings: ['check'] };
   const parser = { parse: vi.fn<StatisticsParser['parse']>(async () => parsed) };
   const isOnline = vi.fn(() => true);
-  const service = createDraftService({ repository, ids, clock, transcriber, parser, isOnline });
-  return { repository, match, transcriber, parser, service, parsed, isOnline, name };
+  const scheduler = manualScheduler();
+  const service = createDraftService({ repository, ids, clock, transcriber, parser, isOnline, scheduler });
+  return { scheduler, repository, match, transcriber, parser, service, parsed, isOnline, name };
 }
 describe('draft processing', () => {
+  async function recorded(ctx: Awaited<ReturnType<typeof setup>>) {
+    return ctx.service.persistDraftFromAudio({ matchId:ctx.match.match.id, setId:ctx.match.sets[0].id, audio:new Blob(['audio']), mimeType:'audio/mp4' });
+  }
+  it('times out a hung transcription with a safe retryable state, then retries without duplicate calls', async () => {
+    const ctx = await setup(); const { service, transcriber, parser, scheduler, repository } = ctx; const draft = await recorded(ctx);
+    let seen!: AbortSignal; transcriber.transcribe.mockImplementationOnce(() => new Promise(() => {}) as never).mockImplementationOnce(async (_input, signal) => { seen = signal; return { text:'won', provider:'test', model:'model' }; });
+    const first = service.retryDraft(draft.id, new AbortController().signal);
+    await vi.waitFor(() => expect(scheduler.timers).toHaveLength(1));
+    expect(scheduler.timers[0].delay).toBe(60000); scheduler.timers[0].fire();
+    const saved = await first;
+    expect(saved.state).toBe('waiting-retry'); expect(saved.error).toEqual({ code:'timeout', message:'Provider request timed out.', phase:'transcription' });
+    expect((await repository.getDraft(draft.id))?.recording).toBeInstanceOf(Blob); expect(transcriber.transcribe).toHaveBeenCalledTimes(1); expect(parser.parse).not.toHaveBeenCalled();
+    expect((await service.retryDraft(draft.id, new AbortController().signal)).state).toBe('ready');
+    expect(transcriber.transcribe).toHaveBeenCalledTimes(2); expect(parser.parse).toHaveBeenCalledTimes(1); expect(seen.aborted).toBe(false);
+  });
+  it('aborts the provider signal on timeout and ignores provider error text', async () => {
+    const ctx = await setup(); const { service, transcriber, scheduler } = ctx; const draft = await recorded(ctx);
+    let seen!: AbortSignal; transcriber.transcribe.mockImplementationOnce((_input, signal) => { seen = signal; return new Promise((_, reject) => signal.addEventListener('abort', () => reject(new Error('sk-secret leaked')))); });
+    const promise = service.retryDraft(draft.id, new AbortController().signal);
+    await vi.waitFor(() => expect(scheduler.timers).toHaveLength(1)); scheduler.timers[0].fire();
+    const saved = await promise; expect(seen.aborted).toBe(true); expect(saved.error?.code).toBe('timeout'); expect(JSON.stringify(saved.error)).not.toContain('secret');
+  });
+  it('times out a hung parser after keeping the transcript, and retries only the parser', async () => {
+    const ctx = await setup(); const { service, transcriber, parser, scheduler, parsed } = ctx; const draft = await recorded(ctx);
+    parser.parse.mockImplementationOnce(() => new Promise(() => {}) as never);
+    const first = service.retryDraft(draft.id, new AbortController().signal);
+    await vi.waitFor(() => expect(scheduler.timers).toHaveLength(2)); scheduler.timers[1].fire();
+    const saved = await first; expect(saved.state).toBe('waiting-retry'); expect(saved.error).toEqual({ code:'timeout', message:'Provider request timed out.', phase:'parser' }); expect(saved.transcripts).toHaveLength(1);
+    parser.parse.mockResolvedValueOnce(parsed);
+    expect((await service.retryDraft(draft.id, new AbortController().signal)).state).toBe('ready');
+    expect(transcriber.transcribe).toHaveBeenCalledTimes(1); expect(parser.parse).toHaveBeenCalledTimes(2);
+  });
+  it('clears every timer after completion so none can fire later', async () => {
+    const ctx = await setup(); const { service, scheduler } = ctx; const draft = await recorded(ctx);
+    expect((await service.retryDraft(draft.id, new AbortController().signal)).state).toBe('ready');
+    expect(scheduler.timers).toHaveLength(2); expect(scheduler.timers.every(timer => timer.cleared)).toBe(true);
+  });
+  it('turns a caller abort into a neutral cancelled waiting-retry draft, even if the provider ignores the signal', async () => {
+    const ctx = await setup(); const { service, transcriber, parser, scheduler, repository } = ctx; const draft = await recorded(ctx);
+    transcriber.transcribe.mockImplementationOnce(() => new Promise(() => {}) as never);
+    const controller = new AbortController(); const promise = service.retryDraft(draft.id, controller.signal);
+    await vi.waitFor(() => expect(scheduler.timers).toHaveLength(1)); controller.abort();
+    const saved = await promise;
+    expect(saved.state).toBe('waiting-retry'); expect(saved.error).toEqual({ code:'cancelled', message:'Processing cancelled.', phase:'transcription' });
+    expect(scheduler.timers[0].cleared).toBe(true); expect((await repository.getDraft(draft.id))?.state).toBe('waiting-retry'); expect((await repository.getDraft(draft.id))?.recording).toBeInstanceOf(Blob); expect(parser.parse).not.toHaveBeenCalled();
+  });
+  it('does not call a provider when already cancelled', async () => {
+    const ctx = await setup(); const { service, transcriber } = ctx; const draft = await recorded(ctx);
+    const controller = new AbortController(); controller.abort();
+    expect((await service.retryDraft(draft.id, controller.signal)).error?.code).toBe('cancelled'); expect(transcriber.transcribe).not.toHaveBeenCalled();
+  });
   it('persists an audio draft without starting either provider', async () => {
     const { service, repository, match, transcriber, parser } = await setup();
     const draft = await service.persistDraftFromAudio({ matchId:match.match.id, setId:match.sets[0].id, audio:new Blob(['audio']), mimeType:'audio/mp4' });
@@ -147,10 +204,10 @@ describe('draft processing', () => {
     const save = vi.spyOn(repository, 'saveDraft');
     transcriber.transcribe.mockImplementation(async () => { expect(save.mock.calls.at(-1)?.[0]).toMatchObject({ recording: audio, state: 'processing' }); return { text: 'won', provider: 'test', model: 'model' }; });
     parser.parse.mockImplementation(async request => { expect(save.mock.calls.at(-1)?.[0].transcripts).toHaveLength(1); expect(request).toMatchObject({ transcript: 'won', expectedNext: 'player' }); return parsed; });
-    const signal = new AbortController().signal;
+    const controller = new AbortController(); const signal = controller.signal;
     const result = await service.createDraftFromAudio({ matchId: match.match.id, setId: match.sets[0].id, audio, mimeType: 'audio/mp4' }, signal);
     expect(result).toMatchObject({ state: 'ready', parsedDraft: parsed });
-    expect(transcriber.transcribe.mock.calls[0][1]).toBe(signal);
+    const passed = transcriber.transcribe.mock.calls[0][1]; expect(passed.aborted).toBe(false); expect(controller.signal).toBe(signal);
   });
   it('retains transcript and prior parse across a failed refinement and retries only the parser', async () => {
     const { service, match, parser, transcriber, parsed, repository } = await setup();

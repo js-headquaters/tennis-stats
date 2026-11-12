@@ -224,3 +224,39 @@ it.each([['retryDraft', 'waiting-retry', 'Retry processing'], ['confirmDraft', '
   expect(screen.queryByText(/could not (retry|confirm)/i)).not.toBeInTheDocument(); expect(document.body).not.toHaveTextContent('secret');
   expect(discardButton()).toBeEnabled(); expect(screen.getByRole('button', { name:label })).toBeDisabled();
 });
+const cancelledDraft: VoiceDraft = { ...draft, state:'waiting-retry', error:{ code:'cancelled', message:'Processing cancelled.', phase:'parser' } };
+it('offers a 44px Cancel processing button only while a provider call is in flight and ends retryable', async () => {
+  const { service } = setup({ ...draft, state:'waiting-retry', error:{ code:'offline', message:'x', phase:'parser' } });
+  expect(await screen.findByRole('button', { name:'Retry processing' })).toBeInTheDocument(); expect(screen.queryByRole('button', { name:'Cancel processing' })).toBeNull();
+  let signal!: AbortSignal;
+  service.retryDraft.mockImplementation((_id: string, s: AbortSignal) => { signal = s; return new Promise(resolve => s.addEventListener('abort', () => resolve(cancelledDraft))); });
+  fireEvent.click(screen.getByRole('button', { name:'Retry processing' }));
+  const cancel = await screen.findByRole('button', { name:'Cancel processing' }); expect(getComputedStyle(cancel).minHeight).toBe('44px'); expect(workRegistry.isBusy()).toBe(true);
+  fireEvent.click(cancel); expect(signal.aborted).toBe(true);
+  expect(await screen.findByRole('button', { name:'Retry processing' })).toBeEnabled(); expect(screen.getByText('Processing cancelled.')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name:'Cancel processing' })).toBeNull(); expect(screen.queryByRole('alert')).toBeNull(); await waitFor(() => expect(workRegistry.isBusy()).toBe(false)); expect(document.body).not.toHaveTextContent(/request failed|was cancelled/i);
+});
+it('shows a timeout message from the persisted draft', async () => {
+  setup({ ...draft, state:'waiting-retry', error:{ code:'timeout', message:'x', phase:'parser' } });
+  expect(await screen.findByText('Provider request timed out.')).toBeInTheDocument(); expect(screen.getByRole('button', { name:'Retry processing' })).toBeInTheDocument();
+});
+it('on unmount aborts the call, keeps the registry held and closes an owned repository only after the call settles', async () => {
+  const repo = { getDraft:vi.fn().mockResolvedValue({ ...draft, state:'waiting-retry', error:{ code:'offline', message:'x', phase:'parser' } }), getMatchBundle:vi.fn().mockResolvedValue(fittingBundle), close:vi.fn(), getRecoveryStatus:() => ({ mode:'normal' as const }) };
+  const open = vi.spyOn(dependencies, 'openDatabase').mockResolvedValueOnce(repo as never);
+  let signal!: AbortSignal; let settle!: () => void; const persisted = vi.fn();
+  const service = { retryDraft:vi.fn((_id: string, s: AbortSignal) => { signal = s; return new Promise(resolve => { settle = () => { persisted(repo.close.mock.calls.length); resolve(cancelledDraft); }; }); }), refineDraftWithAudio:vi.fn(), updateDraftGame:vi.fn(), confirmDraft:vi.fn(), discardDraft:vi.fn() };
+  const view = render(<MemoryRouter initialEntries={['/voice/d']}><Routes><Route path="/voice/:draftId" element={<DraftReviewPage createService={() => service as never} />} /></Routes></MemoryRouter>);
+  fireEvent.click(await screen.findByRole('button', { name:'Retry processing' })); await screen.findByRole('button', { name:'Cancel processing' });
+  const errors = vi.spyOn(console, 'error').mockImplementation(() => {}); const unhandled = vi.fn(); process.on('unhandledRejection', unhandled);
+  view.unmount();
+  expect(signal.aborted).toBe(true); expect(repo.close).not.toHaveBeenCalled(); expect(workRegistry.isBusy()).toBe(true);
+  settle(); await waitFor(() => expect(repo.close).toHaveBeenCalledTimes(1)); expect(persisted).toHaveBeenCalledWith(0);
+  await waitFor(() => expect(workRegistry.isBusy()).toBe(false)); await new Promise(resolve => setTimeout(resolve, 0));
+  expect(unhandled).not.toHaveBeenCalled(); expect(errors).not.toHaveBeenCalled(); process.off('unhandledRejection', unhandled); errors.mockRestore(); open.mockRestore();
+});
+it('closes an owned repository after a rejected in-flight call too, and never an injected one', async () => {
+  const { service, repository, view } = setup({ ...draft, state:'waiting-retry', error:{ code:'offline', message:'x', phase:'parser' } });
+  let fail!: (e: unknown) => void; service.retryDraft.mockReturnValue(new Promise((_, r) => { fail = r; }));
+  fireEvent.click(await screen.findByRole('button', { name:'Retry processing' })); await screen.findByRole('button', { name:'Cancel processing' });
+  view.unmount(); fail(new Error('boom')); await waitFor(() => expect(workRegistry.isBusy()).toBe(false)); expect(repository.close).not.toHaveBeenCalled();
+});
