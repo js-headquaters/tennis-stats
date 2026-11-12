@@ -188,23 +188,23 @@ Run `npm test -- src/domain/scoring.test.ts && npm run typecheck`, then `git add
 **Interfaces:**
 - Produces: `TennisRepository` with transaction methods `getActiveMatch()`, `getMatchBundle(id)`, `listMatches(filter)`, `saveMatchBundle(bundle)`, `deleteMatch(id)`, `saveDraft(draft)`, `getDraft(id)`, `deleteDraft(id)`, `listOpponents()`, and `replaceAll(snapshot)`; `Clock.now(): string`; `IdGenerator.next(): string`; `openDatabase(): Promise<TennisRepository>`; `runDataMigrations(db, fromVersion, toVersion): Promise<void>`; one application dependency container wired in `src/app/dependencies.ts`.
 
-- [ ] **Step 1: Write failing repository contract tests**
+- [x] **Step 1: Write failing repository contract tests**
 
 Use fake-indexeddb to assert complete match-bundle transactions, one active match, reusable opponent lookup, ordinal ordering, draft Blob round-trip, and `null`/`0` preservation.
 
-- [ ] **Step 2: Write failing migration-guard tests**
+- [x] **Step 2: Write failing migration-guard tests**
 
 Seed a version-0 fixture, migrate to version 1, reopen, and assert idempotence. Force a migration exception and assert the original records remain and the repository enters read-only recovery instead of clearing the database.
 
-- [ ] **Step 3: Run tests and verify failure**
+- [x] **Step 3: Run tests and verify failure**
 
 Run `npm test -- src/infrastructure/db`; expect missing adapters.
 
-- [ ] **Step 4: Implement Dexie schema version 1 and repositories**
+- [x] **Step 4: Implement Dexie schema version 1 and repositories**
 
 Create stores/indexes for opponents, matches, sets, games, tieBreaks, drafts, and metadata. Keep the repository interface free of Dexie types and wrap multi-table writes in one transaction.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run `npm test -- src/infrastructure/db && npm run typecheck`, then `git add src/application/ports.ts src/app/dependencies.ts src/infrastructure/db && git commit -m "feat: persist versioned tennis data"`.
 
