@@ -26,3 +26,6 @@
 .record-page { padding-bottom: 6rem; }
 .record-page button, .record-page a { min-height: 44px; min-width: 44px; padding: .5rem; font: inherit; }
 .record-page a { display: inline-flex; align-items: center; }
+.draft-review { padding-bottom: 6rem; }
+.draft-review button, .draft-review a { min-height: 44px; min-width: 44px; padding: .5rem; font: inherit; }
+.draft-review a { display: inline-flex; align-items: center; }
