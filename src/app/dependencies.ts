@@ -1,6 +1,6 @@
 import type { Clock, IdGenerator } from '../application/ports';
 import { openDatabase } from '../infrastructure/db/database';
-import type { TennisRepository } from '../application/ports';
+import type { RecoveryStatus, TennisRepository } from '../application/ports';
 import { createDraftService } from '../application/draftService';
 import { createAudioRecorder } from '../infrastructure/audio/mediaRecorder';
 import { createLocalSettings } from '../infrastructure/settings/localSettings';
@@ -18,6 +18,11 @@ export const dependencies = {
   clock: { now: () => new Date().toISOString() } satisfies Clock,
   ids: { next: () => crypto.randomUUID() } satisfies IdGenerator,
   openDatabase,
+  /** Opens the app database once (running the startup migration) and reports whether it is in read-only recovery. */
+  async loadRecoveryStatus(): Promise<RecoveryStatus> {
+    const repository = await dependencies.openDatabase();
+    try { return repository.getRecoveryStatus(); } finally { repository.close(); }
+  },
   createRecorder: createAudioRecorder,
   createDraftService: (repository: TennisRepository) => createDraftService({
     repository, clock: dependencies.clock, ids: dependencies.ids, isOnline: () => navigator.onLine,

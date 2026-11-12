@@ -66,7 +66,7 @@ it('filters suggestions and explicitly resolves an active match', async () => {
 });
 it('recovers from a failed repository load on retry', async () => {
   const listOpponents = vi.fn().mockRejectedValueOnce(new Error('List failed')).mockResolvedValue([]);
-  const repository = { listOpponents, getActiveMatch: vi.fn().mockResolvedValue(undefined) } as unknown as TennisRepository;
+  const repository = { listOpponents, getActiveMatch: vi.fn().mockResolvedValue(undefined), getRecoveryStatus: () => ({ mode: 'normal' as const }) } as unknown as TennisRepository;
   const deps = { repository, clock: { now: () => '2026-01-01T12:00:00.000Z' }, ids: { next: () => 'id' } };
   render(<MemoryRouter><StartMatchPage deps={deps} /></MemoryRouter>);
   expect(await screen.findByRole('alert')).toHaveTextContent('List failed');
@@ -78,7 +78,7 @@ it('recovers from a failed repository load on retry', async () => {
   expect(listOpponents).toHaveBeenCalledTimes(2);
 });
 it('reopens the database after an open failure', async () => {
-  const repository = { listOpponents: vi.fn().mockResolvedValue([]), getActiveMatch: vi.fn().mockResolvedValue(undefined), close: vi.fn() };
+  const repository = { listOpponents: vi.fn().mockResolvedValue([]), getActiveMatch: vi.fn().mockResolvedValue(undefined), close: vi.fn(), getRecoveryStatus: () => ({ mode: 'normal' as const }) };
   const open = vi.spyOn(dependencies, 'openDatabase').mockRejectedValueOnce(new Error('Open failed')).mockResolvedValueOnce(repository as unknown as Awaited<ReturnType<typeof dependencies.openDatabase>>);
   render(<MemoryRouter><StartMatchPage /></MemoryRouter>);
   expect(await screen.findByRole('alert')).toHaveTextContent('Open failed');
@@ -101,4 +101,24 @@ it.each([
   fireEvent.click(screen.getByRole('button', { name: 'Start match' }));
   await screen.findByText('Live placeholder');
   expect((await deps.repository.getActiveMatch())?.match.format).toBe(value);
+});
+it('in read-only recovery mode explains why a match cannot be started and disables the abandon action', async () => {
+  const name = `ui-recovery-active-${crypto.randomUUID()}`;
+  const clock = { now: () => '2026-01-01T12:00:00.000Z' }; const ids = { next: () => `ui-id-${++n}` };
+  const seeded = await openDatabase(name);
+  await startMatch({ opponentName: 'Alex', playedAt: '2026-01-01T12:00:00.000Z', format: 'oneSet', firstServer: 'player' }, { repository: seeded, clock, ids });
+  seeded.close();
+  const recovery = await openDatabase(name, async () => { throw new Error('migration failed'); }); repos.push(recovery);
+  const write = vi.spyOn(recovery, 'abandonMatch');
+  show({ repository: recovery, clock, ids });
+  expect(await screen.findByText(/read-only recovery mode/i)).toHaveTextContent(/starting or abandoning a match is turned off/i);
+  expect(screen.getByRole('button', { name: /abandon active match/i })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: /abandon active match/i }));
+  expect(write).not.toHaveBeenCalled();
+});
+it('in read-only recovery mode disables the start form submit', async () => {
+  const recovery = await openDatabase(`ui-recovery-empty-${++n}`, async () => { throw new Error('migration failed'); }); repos.push(recovery);
+  show({ repository: recovery, clock: { now: () => '2026-01-01T12:00:00.000Z' }, ids: { next: () => `ui-id-${++n}` } });
+  expect(await screen.findByRole('button', { name: 'Start match' })).toBeDisabled();
+  expect(screen.getByText(/read-only recovery mode/i)).toHaveTextContent(/your data is preserved/i);
 });

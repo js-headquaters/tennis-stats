@@ -6,6 +6,7 @@ import type { VoiceDraft } from '../../domain/model';
 import { evaluateSet } from '../../domain/scoring';
 import type { AudioRecorder } from '../../infrastructure/audio/mediaRecorder';
 import { useWorkHold } from '../../app/workGuard';
+import ReadOnlyNotice from '../../components/ReadOnlyNotice';
 
 type Service = { persistDraftFromAudio(input: { matchId: string; setId: string; audio: Blob; mimeType: string }): Promise<Pick<VoiceDraft, 'id' | 'state'>> };
 type Scheduler = { schedule(action: () => void, delay: number): () => void };
@@ -66,8 +67,9 @@ function RecordContent({ matchId, repository, createRecorder = dependencies.crea
     const code = safeCode(reason);
     setError(messages[code] ?? 'Recording or processing failed. Please try again. Previously saved recordings may still be available.'); setState('error');
   }
+  const readOnly = loaded?.repo.getRecoveryStatus().mode === 'readOnly';
   async function start() {
-    if (lock.current || !loaded) return; lock.current = true; const token = ++generation.current; setError(''); setUnsaved(null); setState('requesting-permission');
+    if (lock.current || !loaded || readOnly) return; lock.current = true; const token = ++generation.current; setError(''); setUnsaved(null); setState('requesting-permission');
     try {
       const current = createRecorder(); recorder.current = current; await current.start();
       if (!alive.current || token !== generation.current) return;
@@ -128,8 +130,9 @@ function RecordContent({ matchId, repository, createRecorder = dependencies.crea
       <p>Record up to two minutes. Recording stops automatically at the limit.</p>
       <p role="status" aria-live="polite">{({ idle:'Ready to record.', 'requesting-permission':'Requesting microphone permission…', recording:'Recording…', stopping:'Stopping recording…', saving:'Saving recording…', error:'Recording unavailable.' } as const)[state]}</p>
       {error && <p role="alert">{error}</p>}
+      {readOnly && <ReadOnlyNotice disabled="recording is" />}
       {unsaved && state === 'error' && <><p>This recording has not been saved yet. Starting a new recording discards it.</p><button onClick={() => void retrySave()}>Retry saving recording</button></>}
-      {(state === 'idle' || state === 'error') && <button onClick={() => void start()}>Start recording</button>}
+      {(state === 'idle' || state === 'error') && <button disabled={readOnly} onClick={() => void start()}>Start recording</button>}
       {state === 'recording' && <button onClick={() => void stop()}>Stop recording</button>}
       {(state === 'requesting-permission' || state === 'recording' || state === 'stopping') && <button onClick={() => void cancel()}>Cancel recording</button>}
     </>}

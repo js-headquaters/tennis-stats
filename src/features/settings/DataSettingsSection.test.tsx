@@ -236,3 +236,23 @@ it('gives data controls 44px touch targets', async () => {
     expect(parseFloat(getComputedStyle(element).minHeight)).toBeGreaterThanOrEqual(44);
   }
 });
+
+it('in read-only recovery mode keeps export working, disables import and clearing with an explanation, and leaves AI settings usable', async () => {
+  const name = `data-settings-recovery-${crypto.randomUUID()}`;
+  const seeded = await openDatabase(name); await applyImport(previewImport(v1Text), 'replace', seeded); seeded.close();
+  const repo = await openDatabase(name, async () => { throw new Error('migration failed'); }); repos.push(repo);
+  const insert = vi.spyOn(repo, 'insertRecords'); const replace = vi.spyOn(repo, 'replaceAll');
+  const { section, transfer } = show(repo);
+  expect(await section.findByText(/On this device: 2 matches/)).toBeInTheDocument();
+  const notices = await section.findAllByText(/read-only recovery mode/i);
+  expect(notices.map(n => n.textContent).join(' ')).toMatch(/importing is turned off/i);
+  expect(notices.map(n => n.textContent).join(' ')).toMatch(/clearing data is turned off/i);
+  expect(section.getByLabelText('Backup file to import')).toBeDisabled();
+  expect(section.getByLabelText('Type DELETE to confirm')).toBeDisabled();
+  expect(section.getByRole('button', { name: 'Clear all data' })).toBeDisabled();
+  fireEvent.click(section.getByRole('button', { name: 'Export backup' }));
+  await waitFor(() => expect(transfer.download).toHaveBeenCalledTimes(1));
+  expect(await section.findByText(/Backup saved as/)).toBeInTheDocument();
+  expect(within(screen.getByRole('group', { name: 'Statistics parser' })).getByRole('button', { name: 'Save' })).toBeEnabled();
+  expect(insert).not.toHaveBeenCalled(); expect(replace).not.toHaveBeenCalled();
+});

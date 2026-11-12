@@ -12,8 +12,30 @@ export interface StatisticsParser { parse(request: { transcript: string; matchCo
 export interface Clock { now(): string }
 export interface IdGenerator { next(): string }
 export interface MatchFilter { status?: MatchStatus; opponentId?: string; /** Inclusive ISO instant lower bound on playedAt. */ from?: string; /** Inclusive ISO instant upper bound on playedAt. */ to?: string }
+/** Stable, secret-free codes for why the database is in read-only recovery mode. */
+export type RecoveryCode = 'newer-data-version' | 'invalid-data-version' | 'storage-write-failed' | 'migration-step-failed' | 'migration-failed';
+/**
+ * Diagnostics safe to show and copy: fixed texts and version numbers only. Never an error message or stack,
+ * record contents, API keys or storage keys.
+ */
+export interface SafeDiagnostics {
+  code: RecoveryCode;
+  /** Short fixed human message for `code`. */
+  message: string;
+  /** The data migration step that failed, when one had started. */
+  failedStep: { fromVersion: number; toVersion: number } | null;
+  /** Stored data version (a missing row is 0); null when it is not a number. */
+  storedDataVersion: number | null;
+  /** The data version this app expects. */
+  appDataVersion: number;
+  appVersion: string | null;
+  /** Sanitized error class name (identifier characters only), e.g. `QuotaExceededError`. */
+  errorName: string;
+}
+export type RecoveryStatus = { mode: 'normal' } | { mode: 'readOnly'; diagnostics: SafeDiagnostics };
 export interface TennisRepository {
-  readonly recoveryError: unknown | null;
+  /** `readOnly` when startup migration failed: every write is refused (with `ReadOnlyRecoveryError`) while reads and export keep working. */
+  getRecoveryStatus(): RecoveryStatus;
   getActiveMatch(): Promise<MatchBundle | undefined>;
   getMatchBundle(id: string): Promise<MatchBundle | undefined>;
   listMatches(filter?: MatchFilter): Promise<Match[]>;

@@ -11,7 +11,7 @@ import { workRegistry } from '../../app/workGuard';
 const now = '2026-01-01T00:00:00Z';
 const bundle: MatchBundle = { opponent:{ id:'o', name:'Alex', normalizedName:'alex', createdAt:now, updatedAt:now }, match:{ id:'m', opponentId:'o', playedAt:now, format:'oneSet', firstServer:'player', status:'active', comments:null, createdAt:now, updatedAt:now }, sets:[{ id:'s', matchId:'m', ordinal:1, kind:'standard', status:'active', tieBreakId:null, createdAt:now, updatedAt:now }], games:[], tieBreaks:[] };
 function setup() {
-  const repository = { getMatchBundle:vi.fn().mockResolvedValue(bundle), listDrafts:vi.fn().mockResolvedValue([]), close:vi.fn() } as unknown as TennisRepository;
+  const repository = { getMatchBundle:vi.fn().mockResolvedValue(bundle), listDrafts:vi.fn().mockResolvedValue([]), close:vi.fn(), getRecoveryStatus:() => ({ mode:'normal' }) } as unknown as TennisRepository;
   const recorder = { start:vi.fn().mockResolvedValue(undefined), stop:vi.fn().mockResolvedValue({ blob:new Blob(['audio'], { type:'audio/webm' }), mimeType:'audio/webm' }), cancel:vi.fn().mockResolvedValue(undefined) };
   const service = { persistDraftFromAudio:vi.fn().mockResolvedValue({ id:'d', state:'recorded' }) };
   const view = render(<MemoryRouter initialEntries={['/matches/m/record']}><Routes><Route path="/matches/:matchId/record" element={<RecordPage repository={repository} createRecorder={() => recorder} createService={() => service} />} /><Route path="/voice/:draftId" element={<p>Draft review</p>} /></Routes></MemoryRouter>);
@@ -44,7 +44,7 @@ it('cancels without submitting and does not close an injected repository', async
 function memoryRepository() {
   const drafts = new Map<string, VoiceDraft>();
   return { drafts, repository: {
-    getMatchBundle:vi.fn().mockResolvedValue(bundle), close:vi.fn(),
+    getMatchBundle:vi.fn().mockResolvedValue(bundle), close:vi.fn(), getRecoveryStatus:() => ({ mode:'normal' }),
     saveDraft:vi.fn(async (draft: VoiceDraft) => { drafts.set(draft.id, draft); }), getDraft:vi.fn(async (id: string) => drafts.get(id)),
     listDrafts:vi.fn(async (matchId?: string) => [...drafts.values()].filter(draft => !matchId || draft.matchId === matchId)),
   } as unknown as TennisRepository };
@@ -119,7 +119,7 @@ it('locks duplicate starts and stops while asynchronous work is pending', async 
 });
 it('closes owned repositories on failure and retry, and sanitizes load errors', async () => {
   const failed = { getMatchBundle:vi.fn().mockRejectedValue(new Error('secret-sentinel')), listDrafts:vi.fn().mockResolvedValue([]), close:vi.fn() };
-  const success = { getMatchBundle:vi.fn().mockResolvedValue(bundle), listDrafts:vi.fn().mockResolvedValue([]), close:vi.fn() };
+  const success = { getMatchBundle:vi.fn().mockResolvedValue(bundle), listDrafts:vi.fn().mockResolvedValue([]), close:vi.fn(), getRecoveryStatus:() => ({ mode:'normal' as const }) };
   const open = vi.spyOn(dependencies, 'openDatabase').mockResolvedValueOnce(failed as never).mockResolvedValueOnce(success as never);
   const view = render(<MemoryRouter initialEntries={['/matches/m/record']}><Routes><Route path="/matches/:matchId/record" element={<RecordPage />} /></Routes></MemoryRouter>);
   await screen.findByRole('alert'); expect(document.body).not.toHaveTextContent('secret-sentinel'); expect(failed.close).toHaveBeenCalledTimes(1);
@@ -132,7 +132,7 @@ it('releases an active recorder on unmount', async () => {
 });
 it('automatically stops at the stated limit with an injected scheduler', async () => {
   let deadline!: () => void; const clear = vi.fn(); const scheduler = { schedule:vi.fn((action: () => void) => { deadline = action; return clear; }) };
-  const repository = { getMatchBundle:vi.fn().mockResolvedValue(bundle), listDrafts:vi.fn().mockResolvedValue([]), close:vi.fn() } as unknown as TennisRepository;
+  const repository = { getMatchBundle:vi.fn().mockResolvedValue(bundle), listDrafts:vi.fn().mockResolvedValue([]), close:vi.fn(), getRecoveryStatus:() => ({ mode:'normal' }) } as unknown as TennisRepository;
   const recorder = { start:vi.fn().mockResolvedValue(undefined), stop:vi.fn().mockResolvedValue({ blob:new Blob(['x']), mimeType:'audio/webm' }), cancel:vi.fn().mockResolvedValue(undefined) };
   const service = { persistDraftFromAudio:vi.fn().mockResolvedValue({ id:'d', state:'recorded' }) };
   render(<MemoryRouter initialEntries={['/matches/m/record']}><Routes><Route path="/matches/:matchId/record" element={<RecordPage repository={repository} createRecorder={() => recorder} createService={() => service} scheduler={scheduler} />} /><Route path="/voice/:draftId" element={<p>Draft review</p>} /></Routes></MemoryRouter>);
@@ -164,7 +164,7 @@ type Persist = (input: { matchId: string; setId: string; audio: Blob; mimeType: 
 function renderWithSaveTimer(persist: ReturnType<typeof vi.fn<Persist>>) {
   const timers: Array<{ action: () => void; delay: number; cleared: boolean }> = [];
   const scheduler = { schedule:vi.fn((action: () => void, delay: number) => { const timer = { action, delay, cleared:false }; timers.push(timer); return () => { timer.cleared = true; }; }) };
-  const repository = { getMatchBundle:vi.fn().mockResolvedValue(bundle), listDrafts:vi.fn().mockResolvedValue([]), close:vi.fn() } as unknown as TennisRepository;
+  const repository = { getMatchBundle:vi.fn().mockResolvedValue(bundle), listDrafts:vi.fn().mockResolvedValue([]), close:vi.fn(), getRecoveryStatus:() => ({ mode:'normal' }) } as unknown as TennisRepository;
   const recorder = { start:vi.fn().mockResolvedValue(undefined), stop:vi.fn().mockResolvedValue({ blob:new Blob(['x']), mimeType:'audio/mp4' }), cancel:vi.fn().mockResolvedValue(undefined) };
   render(<MemoryRouter initialEntries={['/matches/m/record']}><Routes><Route path="/matches/:matchId/record" element={<RecordPage repository={repository} createRecorder={() => recorder} createService={() => ({ persistDraftFromAudio:persist })} scheduler={scheduler} />} /><Route path="/voice/:draftId" element={<p>Draft review</p>} /></Routes></MemoryRouter>);
   const saveTimeout = async () => { const timer = timers.filter(t => t.delay === SAVE_TIMEOUT_MS && !t.cleared).at(-1); expect(timer).toBeDefined(); await act(async () => timer!.action()); };
@@ -226,4 +226,14 @@ it('explains how to enable a denied microphone', async () => {
   const { recorder } = setup(); recorder.start.mockRejectedValue({ code:'permission' });
   fireEvent.click(await screen.findByRole('button', { name:'Start recording' }));
   expect(await screen.findByRole('alert')).toHaveTextContent(/allow microphone access for this site in your browser or device settings/i);
+});
+it('in read-only recovery mode explains that recording is off and never starts the recorder', async () => {
+  const repository = { getMatchBundle:vi.fn().mockResolvedValue(bundle), listDrafts:vi.fn().mockResolvedValue([]), close:vi.fn(), getRecoveryStatus:() => ({ mode:'readOnly', diagnostics:{ code:'newer-data-version', message:'m', failedStep:null, storedDataVersion:3, appDataVersion:2, appVersion:null, errorName:'Error' } }) } as unknown as TennisRepository;
+  const recorder = { start:vi.fn().mockResolvedValue(undefined), stop:vi.fn(), cancel:vi.fn().mockResolvedValue(undefined) };
+  render(<MemoryRouter initialEntries={['/matches/m/record']}><Routes><Route path="/matches/:matchId/record" element={<RecordPage repository={repository} createRecorder={() => recorder} createService={() => ({ persistDraftFromAudio:vi.fn() })} />} /></Routes></MemoryRouter>);
+  const start = await screen.findByRole('button', { name:'Start recording' });
+  expect(start).toBeDisabled();
+  expect(screen.getByText(/read-only recovery mode/i)).toHaveTextContent(/recording is turned off/i);
+  fireEvent.click(start);
+  expect(recorder.start).not.toHaveBeenCalled();
 });

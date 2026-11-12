@@ -4,6 +4,8 @@ import { FileTransferError, type FileTransfer } from '../../infrastructure/backu
 import type { Exclusive, WithRepository } from './DataSettingsSection';
 import { count, DISPLAY_ORDER } from './dataLabels';
 import { PreviewReport, ResultReport } from './ImportReport';
+import ReadOnlyNotice from '../../components/ReadOnlyNotice';
+import { isReadOnlyRecoveryError, READ_ONLY_MESSAGE } from '../../application/recovery';
 
 type Stage =
   | { kind: 'idle' }
@@ -14,12 +16,12 @@ type Stage =
 const UNCHANGED = 'Your current data was not changed.';
 const accepted = (preview: ImportPreviewOk) => DISPLAY_ORDER.reduce((sum, entity) => sum + preview.counts[entity].accepted, 0);
 
-export function ImportPanel({ transfer, exclusive, withRepository, onChanged }: { transfer: FileTransfer; exclusive: Exclusive; withRepository: WithRepository; onChanged: () => void }) {
+export function ImportPanel({ transfer, exclusive, withRepository, onChanged, readOnly = false }: { transfer: FileTransfer; exclusive: Exclusive; withRepository: WithRepository; onChanged: () => void; readOnly?: boolean }) {
   const [stage, setStage] = useState<Stage>({ kind: 'idle' });
   const [inputKey, setInputKey] = useState(0);
   const resetInput = () => setInputKey(key => key + 1);
 
-  const choose = (file: File | undefined) => { if (file) exclusive(async () => {
+  const choose = (file: File | undefined) => { if (file && !readOnly) exclusive(async () => {
     setStage({ kind: 'idle' });
     let text: string;
     try { text = await transfer.readText(file); }
@@ -34,8 +36,8 @@ export function ImportPanel({ transfer, exclusive, withRepository, onChanged }: 
     try {
       const result = await withRepository(repo => applyImport(preview, mode, repo));
       resetInput(); setStage({ kind: 'done', result }); onChanged();
-    } catch {
-      setStage({ kind: 'preview', preview, plan, confirm: null, error: `Couldn't import the backup. ${UNCHANGED} Try again or choose another file.` });
+    } catch (reason) {
+      setStage({ kind: 'preview', preview, plan, confirm: null, error: isReadOnlyRecoveryError(reason) ? `Couldn't import the backup. ${READ_ONLY_MESSAGE}` : `Couldn't import the backup. ${UNCHANGED} Try again or choose another file.` });
     }
   });
 
@@ -43,7 +45,8 @@ export function ImportPanel({ transfer, exclusive, withRepository, onChanged }: 
   return <section aria-labelledby="import-backup-heading">
     <h3 id="import-backup-heading">Import backup</h3>
     <p>Choose a Tennis Stats backup file (.json). You will see what it contains and choose merge or replace before anything changes.</p>
-    <label>Backup file to import <input key={inputKey} type="file" accept=".json,application/json" onChange={event => choose(event.target.files?.[0])} /></label>
+    {readOnly && <ReadOnlyNotice disabled="importing is" />}
+    <label>Backup file to import <input key={inputKey} disabled={readOnly} type="file" accept=".json,application/json" onChange={event => choose(event.target.files?.[0])} /></label>
     {stage.kind === 'invalid' && <p role="alert">{stage.message}</p>}
     {stage.kind === 'done' && <ResultReport result={stage.result} />}
     {stage.kind === 'preview' && <section aria-label="Import preview">

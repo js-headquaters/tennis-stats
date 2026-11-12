@@ -1,7 +1,9 @@
-import type { TennisRepository, MatchFilter } from '../../application/ports';
+import type { TennisRepository, MatchFilter, RecoveryStatus } from '../../application/ports';
+import { ReadOnlyRecoveryError } from '../../application/recovery';
 import type { DatabaseSnapshot, Match, MatchBundle, TennisRecords, VoiceDraft } from '../../domain/model';
 import { DATA_VERSION } from './migrations';
 import type { TennisDatabase } from './schema';
+import { toSafeDiagnostics, UNKNOWN_CONTEXT, type RecoveryContext } from './recoveryDiagnostics';
 
 // Stable serialization: object keys are sorted (by code unit, not locale); arrays keep their order.
 function stable(value: unknown): string {
@@ -22,8 +24,13 @@ function isMarker(value: unknown): value is { draftId: string; matchId: string; 
 }
 
 export class IndexedDbTennisRepository implements TennisRepository {
-  constructor(private db: TennisDatabase, readonly recoveryError: unknown | null, private confirmationHook?: () => void) {}
-  private writable() { if (this.recoveryError !== null) throw new Error('Database is in read-only recovery mode'); }
+  private readonly recoveryStatus: RecoveryStatus;
+  /** `recoveryError` stays internal to infrastructure: the port only exposes the sanitized `getRecoveryStatus()`. */
+  constructor(private db: TennisDatabase, readonly recoveryError: unknown | null, private confirmationHook?: () => void, recoveryContext: RecoveryContext = UNKNOWN_CONTEXT) {
+    this.recoveryStatus = recoveryError === null ? { mode: 'normal' } : { mode: 'readOnly', diagnostics: Object.freeze(toSafeDiagnostics(recoveryError, recoveryContext)) };
+  }
+  getRecoveryStatus(): RecoveryStatus { return this.recoveryStatus; }
+  private writable() { if (this.recoveryError !== null) throw new ReadOnlyRecoveryError(); }
   close() { this.db.close(); }
   async listOpponents() { return this.db.opponents.toArray(); }
   /** Newest first by `playedAt`; `from`/`to` are inclusive ISO instants. Matches with an unreadable date sort last and never satisfy a date bound. */

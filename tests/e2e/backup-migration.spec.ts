@@ -353,28 +353,63 @@ test.describe('journey 12: upgrading a previous database version', () => {
   });
 
   test.describe('a migration that cannot complete stays in read-only recovery', () => {
-    async function expectRecovery(page: Page, before: StoredSnapshot) {
-      await page.goto(SETTINGS);
+    const banner = (page: Page) => page.getByRole('region', { name: 'Read-only recovery mode' });
+    /** Reads the banner's diagnostics through its copy fallback (clipboard refused), then through a captured copy. */
+    async function copiedDiagnostics(page: Page) {
+      await page.evaluate(() => { Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.reject(new Error('denied')) } }); });
+      await banner(page).getByRole('button', { name: 'Copy diagnostics' }).click();
+      await expect(banner(page).getByRole('status')).toHaveText(/Couldn't copy automatically/);
+      const fallback = await banner(page).getByRole('textbox', { name: 'Diagnostics' }).inputValue();
+      await page.evaluate(() => { Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: (text: string) => { (window as unknown as { copied: string }).copied = text; return Promise.resolve(); } } }); });
+      await banner(page).getByRole('button', { name: 'Copy diagnostics' }).click();
+      await expect(banner(page).getByRole('status')).toHaveText('Diagnostics copied.');
+      expect(await page.evaluate(() => (window as unknown as { copied: string }).copied)).toBe(fallback);
+      return fallback;
+    }
+    async function expectRecovery(page: Page, before: StoredSnapshot, expected: Record<string, unknown>) {
+      // The banner is on every route, including a direct navigation and a reload.
+      for (const route of ['#/', '#/matches/m/live']) {
+        await page.goto(route); await page.reload();
+        await expect(banner(page)).toBeVisible();
+        await expect(banner(page).getByRole('alert')).toHaveText(/your data is preserved on this device/);
+        await expect(banner(page)).toContainText('starting matches, adding or editing games, recording, importing and clearing data are turned off');
+      }
+      for (const control of [banner(page).getByRole('link', { name: 'Export a backup in Settings' }), banner(page).getByRole('button', { name: 'Copy diagnostics' }), banner(page).getByRole('button', { name: 'Reload to retry the upgrade' })]) {
+        expect((await control.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      }
+      // Safe diagnostics: stable fields only, never data, error messages or keys.
+      const text = await copiedDiagnostics(page);
+      const diagnostics = JSON.parse(text) as Record<string, unknown>;
+      expect(Object.keys(diagnostics).sort()).toEqual(['appDataVersion', 'appVersion', 'code', 'errorName', 'failedStep', 'message', 'storedDataVersion']);
+      expect(diagnostics).toMatchObject({ appDataVersion: CURRENT_DATA_VERSION, appVersion: '1.0.0', ...expected });
+      for (const secret of [FAKE_API_KEY, 'Injected', 'Alex', 'Won game', 'tennis-stats', 'apiKey', ' at ']) expect(text).not.toContain(secret);
+
+      // Write entry points are disabled and explained instead of failing.
+      await expect(page.getByRole('button', { name: 'Manual game entry' })).toBeDisabled();
+      await expect(page.getByRole('button', { name: 'Finish match' })).toBeDisabled();
+      await expect(page.getByRole('link', { name: 'Record with voice' })).toHaveCount(0);
+      await expect(page.getByRole('main').getByRole('note')).toContainText('Read-only recovery mode: adding or editing games, recording and finishing the match are turned off');
+      await page.goto('#/matches/new');
+      await expect(page.getByRole('button', { name: 'Abandon active match' })).toBeDisabled();
+      await expect(page.getByRole('main').getByRole('note')).toContainText('starting or abandoning a match is turned off');
+      await page.goto('#/matches/m/record');
+      await expect(page.getByRole('button', { name: 'Start recording' })).toBeDisabled();
+      await expect(page.getByRole('main').getByRole('note')).toContainText('recording is turned off');
+
+      // The banner's export path works and the backup contains the preserved data.
+      await banner(page).getByRole('link', { name: 'Export a backup in Settings' }).click();
+      await expect(page).toHaveURL(/#\/settings$/);
       await expect(page.getByText(/^On this device: 2 matches, 1 opponent, 2 sets, 3 games, 1 tie-break/)).toBeVisible();
-      // Export still works and contains the preserved data.
       const file = await exportFromUi(page);
       expect(records((JSON.parse(file.text) as { data: TennisRecords }).data)).toEqual(records(tennisStores as unknown as TennisRecords));
-      // Writes are refused; nothing is reset or deleted.
-      await page.getByLabel('Type DELETE to confirm').fill('DELETE');
-      await page.getByRole('button', { name: 'Clear all data' }).click();
-      await expect(page.getByRole('alert')).toHaveText("Couldn't clear data. Nothing was deleted. Try again.");
-      await importFromUiExpectingFailure(page, file);
-      await page.goto('#/matches/m/live');
-      await page.getByRole('button', { name: 'Manual game entry' }).click();
-      await page.getByRole('form', { name: 'Manual game entry' }).getByRole('button', { name: 'Add game' }).click();
-      await expect(page.getByRole('alert').first()).toBeVisible();
+      // Importing and clearing are disabled with an explanation; AI settings (local storage) stay usable.
+      await expect(page.getByLabel('Backup file to import')).toBeDisabled();
+      await expect(page.getByLabel('Type DELETE to confirm')).toBeDisabled();
+      await expect(page.getByRole('button', { name: 'Clear all data' })).toBeDisabled();
+      await expect(page.getByRole('note').filter({ hasText: 'importing is turned off' })).toBeVisible();
+      await expect(page.getByRole('note').filter({ hasText: 'clearing data is turned off' })).toBeVisible();
+      await expect(page.getByRole('group', { name: 'Statistics parser' }).getByRole('button', { name: 'Save' })).toBeEnabled();
       expect(await readDatabase(page), 'the database is preserved exactly').toEqual(before);
-    }
-    async function importFromUiExpectingFailure(page: Page, file: { name: string; text: string }) {
-      await chooseFile(page, file.name, file.text);
-      await preview(page).getByRole('button', { name: 'Replace current data' }).click();
-      await page.getByRole('button', { name: 'Confirm replace' }).click();
-      await expect(preview(page).getByRole('alert')).toHaveText("Couldn't import the backup. Your current data was not changed. Try again or choose another file.");
     }
 
     test('a database written by a NEWER app version (data version above the current one) is not touched', async ({ page }) => {
@@ -382,7 +417,7 @@ test.describe('journey 12: upgrading a previous database version', () => {
       await page.goto('#/');
       const before = await readDatabase(page);
       expect(before.dataVersion).toBe(CURRENT_DATA_VERSION + 1);
-      await expectRecovery(page, before);
+      await expectRecovery(page, before, { code: 'newer-data-version', storedDataVersion: CURRENT_DATA_VERSION + 1, failedStep: null });
     });
 
     test('a failing data migration step (the version-0 database keeps no version row) still offers export', async ({ page }) => {
@@ -400,7 +435,7 @@ test.describe('journey 12: upgrading a previous database version', () => {
       const before = await readDatabase(page);
       expect(before.dataVersion, 'the failed upgrade rolled back: still data version 0').toBeNull();
       expect(before.voiceDrafts).toEqual([{ ...legacyDraft, recording: null }]);
-      await expectRecovery(page, before);
+      await expectRecovery(page, before, { code: 'storage-write-failed', storedDataVersion: 0, failedStep: { fromVersion: 1, toVersion: 2 }, errorName: 'QuotaExceededError' });
     });
   });
 });

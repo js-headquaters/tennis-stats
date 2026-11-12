@@ -29,6 +29,7 @@ export function DataSettingsSection({ deps = {}, pending, acquire, release }: { 
   const [counts, setCounts] = useState<ClearedCounts | 'failed'>();
   const [revision, setRevision] = useState(0);
   const [clearEpoch, setClearEpoch] = useState(0);
+  const [readOnly, setReadOnly] = useState(false);
   const [exported, setExported] = useState<{ error: boolean; text: string } | null>(null);
 
   const withRepository: WithRepository = useCallback(async task => {
@@ -39,7 +40,8 @@ export function DataSettingsSection({ deps = {}, pending, acquire, release }: { 
 
   useEffect(() => {
     let cancelled = false;
-    withRepository(countRecords).then(value => { if (!cancelled) setCounts(value); }, () => { if (!cancelled) setCounts('failed'); });
+    withRepository(async repo => ({ counts: await countRecords(repo), readOnly: repo.getRecoveryStatus().mode === 'readOnly' }))
+      .then(value => { if (!cancelled) { setCounts(value.counts); setReadOnly(value.readOnly); } }, () => { if (!cancelled) setCounts('failed'); });
     return () => { cancelled = true; };
   }, [withRepository, revision]);
 
@@ -75,7 +77,7 @@ export function DataSettingsSection({ deps = {}, pending, acquire, release }: { 
       <button type="button" onClick={exportFile}>Export backup</button>
       {exported && <p role={exported.error ? 'alert' : 'status'}>{exported.text}</p>}
     </section>
-    <ImportPanel key={clearEpoch} transfer={transfer} exclusive={exclusive} withRepository={withRepository} onChanged={changed} />
-    <ClearDataPanel exclusive={exclusive} withRepository={withRepository} onChanged={() => { changed(); setClearEpoch(value => value + 1); }} />
+    <ImportPanel key={clearEpoch} transfer={transfer} exclusive={exclusive} withRepository={withRepository} onChanged={changed} readOnly={readOnly} />
+    <ClearDataPanel readOnly={readOnly} exclusive={exclusive} withRepository={withRepository} onChanged={() => { changed(); setClearEpoch(value => value + 1); }} />
   </fieldset>;
 }

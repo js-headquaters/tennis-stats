@@ -2,18 +2,20 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { createMemoryRouter, MemoryRouter, Route, RouterProvider, Routes } from 'react-router-dom';
 import { expect, it, vi } from 'vitest';
 import type { MatchServiceDeps } from '../../application/matchService';
-import type { TennisRepository } from '../../application/ports';
+import type { RecoveryStatus, TennisRepository } from '../../application/ports';
 import type { MatchBundle } from '../../domain/model';
 import ActiveMatchPage from './ActiveMatchPage';
 import { dependencies } from '../../app/dependencies';
 
 const now = '2026-01-01T00:00:00.000Z';
 function fixture(): MatchBundle { return { opponent: { id:'o', name:'Alex', normalizedName:'alex', createdAt:now, updatedAt:now }, match: { id:'m', opponentId:'o', playedAt:now, format:'oneSet', firstServer:'player', status:'active', comments:null, createdAt:now, updatedAt:now }, sets:[{ id:'s', matchId:'m', ordinal:1, kind:'standard', status:'active', tieBreakId:null, createdAt:now, updatedAt:now }], games:[], tieBreaks:[] }; }
-function setup(initial?: MatchBundle) {
+const normal = () => ({ mode:'normal' as const });
+const readOnly = () => ({ mode:'readOnly' as const, diagnostics:{ code:'newer-data-version' as const, message:'m', failedStep:null, storedDataVersion:3, appDataVersion:2, appVersion:null, errorName:'Error' } });
+function setup(initial?: MatchBundle, getRecoveryStatus: () => RecoveryStatus = normal) {
   let data: MatchBundle = initial ?? fixture();
   const save = vi.fn(async (bundle: MatchBundle) => { data = structuredClone(bundle); });
   const get = vi.fn(async () => structuredClone(data));
-  const repository = { getMatchBundle:get, listMatches:async () => [data.match], saveMatchBundle:save, close:vi.fn() } as unknown as TennisRepository;
+  const repository = { getMatchBundle:get, listMatches:async () => [data.match], saveMatchBundle:save, close:vi.fn(), getRecoveryStatus } as unknown as TennisRepository;
   let id = 0; const deps: MatchServiceDeps = { repository, clock:{ now:() => now }, ids:{ next:() => `g${++id}` } };
   render(<MemoryRouter initialEntries={['/matches/m/live']}><Routes><Route path="/matches/:matchId/live" element={<ActiveMatchPage deps={deps} />} /></Routes></MemoryRouter>);
   return { save, get, data: () => data };
@@ -68,7 +70,7 @@ it('edits a non-disruptive metric immediately', async () => {
 });
 it('offers retry when loading fails', async () => {
   const b = fixture(); const get = vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValue(b);
-  const deps: MatchServiceDeps = { repository: { getMatchBundle:get, close:vi.fn() } as unknown as TennisRepository, clock:{ now:() => now }, ids:{ next:() => 'id' } };
+  const deps: MatchServiceDeps = { repository: { getMatchBundle:get, close:vi.fn(), getRecoveryStatus:normal } as unknown as TennisRepository, clock:{ now:() => now }, ids:{ next:() => 'id' } };
   render(<MemoryRouter initialEntries={['/matches/m/live']}><Routes><Route path="/matches/:matchId/live" element={<ActiveMatchPage deps={deps} />} /></Routes></MemoryRouter>);
   expect(await screen.findByRole('alert')).toHaveTextContent('offline'); fireEvent.click(screen.getByRole('button', { name:'Retry' })); expect(await screen.findByText(/Alex/)).toBeInTheDocument(); expect(get).toHaveBeenCalledTimes(2);
 });
@@ -85,7 +87,7 @@ it('ends a set early only after confirmation', async () => {
   fireEvent.click(screen.getByRole('button', { name:'Confirm end set' })); await waitFor(() => expect(save).toHaveBeenCalledTimes(1)); expect(data().sets[0].status).toBe('unfinished');
 });
 it('shows a not-found state with retry', async () => {
-  const deps: MatchServiceDeps = { repository: { getMatchBundle:async () => undefined, close:vi.fn() } as unknown as TennisRepository, clock:{ now:() => now }, ids:{ next:() => 'id' } };
+  const deps: MatchServiceDeps = { repository: { getMatchBundle:async () => undefined, close:vi.fn(), getRecoveryStatus:normal } as unknown as TennisRepository, clock:{ now:() => now }, ids:{ next:() => 'id' } };
   render(<MemoryRouter initialEntries={['/matches/m/live']}><Routes><Route path="/matches/:matchId/live" element={<ActiveMatchPage deps={deps} />} /></Routes></MemoryRouter>);
   expect(await screen.findByRole('alert')).toHaveTextContent('Match not found'); expect(screen.getByRole('button', { name:'Retry' })).toBeInTheDocument();
 });
@@ -102,7 +104,7 @@ it('hides the previous match while a new route loads', async () => {
   const first = fixture(); const second = fixture(); second.match.id = 'new'; second.opponent.name = 'Blair';
   let resolve!: (b: MatchBundle) => void; const deferred = new Promise<MatchBundle>(r => { resolve = r; });
   const save = vi.fn(); const get = vi.fn((id: string) => id === 'm' ? Promise.resolve(first) : deferred);
-  const deps: MatchServiceDeps = { repository: { getMatchBundle:get, saveMatchBundle:save, close:vi.fn() } as unknown as TennisRepository, clock:{ now:() => now }, ids:{ next:() => 'id' } };
+  const deps: MatchServiceDeps = { repository: { getMatchBundle:get, saveMatchBundle:save, close:vi.fn(), getRecoveryStatus:normal } as unknown as TennisRepository, clock:{ now:() => now }, ids:{ next:() => 'id' } };
   const router = createMemoryRouter([{ path:'/matches/:matchId/live', element:<ActiveMatchPage deps={deps} /> }], { initialEntries:['/matches/m/live'] });
   render(<RouterProvider router={router} />); await screen.findByText(/Alex/);
   await act(async () => { await router.navigate('/matches/new/live'); });
@@ -111,7 +113,7 @@ it('hides the previous match while a new route loads', async () => {
 });
 it('closes each owned repository once on failed load and retry, but not injected repositories', async () => {
   const failed = { getMatchBundle:vi.fn().mockRejectedValue(new Error('offline')), close:vi.fn() };
-  const success = { getMatchBundle:vi.fn().mockResolvedValue(fixture()), close:vi.fn() };
+  const success = { getMatchBundle:vi.fn().mockResolvedValue(fixture()), close:vi.fn(), getRecoveryStatus:() => ({ mode:'normal' as const }) };
   const open = vi.spyOn(dependencies, 'openDatabase').mockResolvedValueOnce(failed as never).mockResolvedValueOnce(success as never);
   const view = render(<MemoryRouter initialEntries={['/matches/m/live']}><Routes><Route path="/matches/:matchId/live" element={<ActiveMatchPage />} /></Routes></MemoryRouter>);
   expect(await screen.findByRole('alert')).toHaveTextContent('offline'); expect(failed.close).toHaveBeenCalledTimes(1);
@@ -165,4 +167,18 @@ it('shows both post-completion games and server warnings after deleting an earli
   b.games = results.map((result,i) => ({ id:`post-${i+1}`, setId:'s', ordinal:i+1, server:i % 2 ? 'opponent' : 'player', result, score:null, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns:null, createdAt:now, updatedAt:now }));
   const { save } = setup(b); await screen.findByText(/Alex/); fireEvent.click(screen.getByRole('button', { name:'Delete game 4' }));
   const region = await screen.findByRole('region', { name:/affected records/i }); expect(region).toHaveTextContent('post-10'); expect(region).toHaveTextContent('post-11'); expect(region).toHaveTextContent('expected server shifts'); expect(save).not.toHaveBeenCalled();
+});
+it('in read-only recovery mode explains that editing is off and disables every write action', async () => {
+  const base = fixture();
+  const withGame: MatchBundle = { ...base, games:[{ id:'g1', setId:'s', ordinal:1, server:'player', result:'won', score:null, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns:null, createdAt:now, updatedAt:now }] };
+  const { save } = setup(withGame, readOnly);
+  expect(await screen.findByText(/Alex/)).toBeInTheDocument();
+  expect(screen.getByText(/read-only recovery mode/i)).toHaveTextContent(/adding or editing games, recording and finishing the match are turned off/i);
+  expect(screen.getByRole('button', { name:/manual/i })).toBeDisabled();
+  expect(screen.queryByRole('link', { name:/voice/i })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name:'Finish match' })).toBeDisabled();
+  expect(screen.getByRole('button', { name:'End set early' })).toBeDisabled();
+  expect(screen.getByRole('button', { name:'Save comments' })).toBeDisabled();
+  expect(screen.getByRole('button', { name:'Delete game 1' })).toBeDisabled();
+  expect(save).not.toHaveBeenCalled();
 });

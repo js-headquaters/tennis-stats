@@ -41,7 +41,9 @@ const migrations: Record<number, (db: TennisDatabase) => Promise<void>> = {
   1: migrateLegacyDrafts,
 };
 
-export async function runDataMigrations(db: TennisDatabase, fromVersion: number, toVersion: number): Promise<void> {
+/** `onStep` is told which step starts, before it runs, so a failure can be reported against that step. */
+export type MigrationStepListener = (fromVersion: number, toVersion: number) => void;
+export async function runDataMigrations(db: TennisDatabase, fromVersion: number, toVersion: number, onStep?: MigrationStepListener): Promise<void> {
   if (!Number.isInteger(fromVersion) || !Number.isInteger(toVersion) || fromVersion < 0 || toVersion > DATA_VERSION || fromVersion > toVersion) throw new Error('Unsupported data migration version');
   await db.transaction('rw', db.tables, async () => {
     const stored = (await db.metadata.get('dataVersion'))?.value ?? fromVersion;
@@ -49,6 +51,7 @@ export async function runDataMigrations(db: TennisDatabase, fromVersion: number,
     if (stored > toVersion || stored < fromVersion) throw new Error('Unsupported data migration version');
     for (let version = stored; version < toVersion; version++) {
       const migrate = migrations[version];
+      onStep?.(version, version + 1);
       if (!migrate) throw new Error(`Missing migration from version ${version}`);
       await migrate(db);
       await db.metadata.put({ key: 'dataVersion', value: version + 1 });
