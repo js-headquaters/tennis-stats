@@ -64,7 +64,7 @@ export function buildSet(overrides: Partial<TennisSet> & Pick<TennisSet, 'id' | 
 
 /** All metrics unknown (null) unless given. */
 export function buildGame(overrides: Partial<Game> & Pick<Game, 'id' | 'setId' | 'ordinal' | 'server' | 'result'>): Game {
-  return { score: null, netErrors: null, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null, ...stamp(), ...overrides };
+  return { score: null, netErrors: null, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null, unforcedErrors: null, comments: null, ...stamp(), ...overrides };
 }
 
 export function buildTieBreak(overrides: Partial<TieBreak> & Pick<TieBreak, 'id' | 'setId' | 'kind' | 'playerPoints' | 'opponentPoints'>): TieBreak {
@@ -73,7 +73,7 @@ export function buildTieBreak(overrides: Partial<TieBreak> & Pick<TieBreak, 'id'
 
 /** Parsed draft game for AI scenarios; metrics unknown unless given. */
 export function buildDraftGame(overrides: Partial<DraftGame> & Pick<DraftGame, 'server' | 'result'>): DraftGame {
-  return { netErrors: null, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null, ...overrides };
+  return { netErrors: null, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null, unforcedErrors: null, comments: null, ...overrides };
 }
 
 export type GameSpec = 'W' | 'L' | (Partial<Omit<Game, 'id' | 'setId' | 'ordinal'>> & { result: MatchResult });

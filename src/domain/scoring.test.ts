@@ -4,7 +4,7 @@ import { evaluateMatch, evaluateSet, findCorrectionConflicts, inferServer } from
 
 const game = (ordinal: number, result: Game['result'] = 'won', server: Game['server'] = inferServer('player', ordinal)): Game => ({
   id: `g${ordinal}`, setId: 's1', ordinal, server, result, score: null,
-  netErrors: null, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null,
+  netErrors: null, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null, unforcedErrors: null, comments: null,
   createdAt: '', updatedAt: '',
 });
 const games = (playerGames: number, opponentGames: number) => Array.from({ length: playerGames + opponentGames }, (_, index) => game(index, index < playerGames ? 'won' : 'lost'));

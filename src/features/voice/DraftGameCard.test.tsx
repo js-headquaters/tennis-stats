@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest';
 import DraftGameCard from './DraftGameCard';
 import type { DraftGame } from '../../domain/model';
 
-const game: DraftGame = { server: 'player', result: 'won', netErrors: 0, wideErrors: null, longErrors: 1, doubleFaults: 2, failedReturns: null };
+const game: DraftGame = { server: 'player', result: 'won', netErrors: 0, wideErrors: null, longErrors: 1, doubleFaults: 2, failedReturns: null, unforcedErrors: null, comments: null };
 
 it('labels each field and distinguishes unknown from zero when saving', () => {
   const update = vi.fn().mockResolvedValue(undefined);
@@ -22,7 +22,7 @@ it('labels each field and distinguishes unknown from zero when saving', () => {
 
 it.each([
   ['opponent', game, 'Failed returns', 'Double faults', 'doubleFaults'],
-  ['player', { ...game, server: 'opponent', doubleFaults: null, failedReturns: 3 } as DraftGame, 'Double faults', 'Failed returns', 'failedReturns'],
+  ['player', { ...game, server: 'opponent', doubleFaults: null, failedReturns: 3, unforcedErrors: null, comments: null } as DraftGame, 'Double faults', 'Failed returns', 'failedReturns'],
 ] as const)('clears the incompatible metric when switching to %s', (server, initial, initiallyDisabled, disabled, cleared) => {
   const update = vi.fn().mockResolvedValue(undefined);
   render(<DraftGameCard game={initial} index={2} onUpdate={update} />);

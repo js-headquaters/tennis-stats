@@ -20,7 +20,7 @@ async function setup() {
   const ids = { next: () => `id-${++n}` };
   const match = await startMatch({ opponentName: 'Alex', playedAt: clock.now(), firstServer: 'player' }, { repository, ids, clock });
   const transcriber = { transcribe: vi.fn<TranscriptionProvider['transcribe']>(async () => ({ text: 'won', provider: 'test', model: 'model' })) };
-  const parsed = { version: 1 as const, games: [{ server: 'player' as const, result: 'won' as const, netErrors: 0, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null }], warnings: ['check'] };
+  const parsed = { version: 1 as const, games: [{ server: 'player' as const, result: 'won' as const, netErrors: 0, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null, unforcedErrors: null, comments: null }], warnings: ['check'] };
   const parser = { parse: vi.fn<StatisticsParser['parse']>(async () => parsed) };
   const isOnline = vi.fn(() => true);
   const scheduler = manualScheduler();
@@ -159,10 +159,10 @@ describe('draft processing', () => {
   });
   it('persists multiple reviewed games with nulls, zeroes and their servers', async () => {
     const { service, match, repository, parser, parsed } = await setup();
-    parser.parse.mockResolvedValueOnce({ ...parsed, games: [parsed.games[0], { ...parsed.games[0], server: 'opponent', result: 'lost', netErrors: null, failedReturns: 0 }] });
+    parser.parse.mockResolvedValueOnce({ ...parsed, games: [parsed.games[0], { ...parsed.games[0], server: 'opponent', result: 'lost', netErrors: null, failedReturns: 0, unforcedErrors: null, comments: null }] });
     const draft = await service.createDraftFromAudio({ matchId: match.match.id, setId: match.sets[0].id, audio: new Blob(['a']), mimeType: 'audio/mp4' }, new AbortController().signal);
     const result = await service.confirmDraft(draft.id);
-    expect(result.bundle.games).toMatchObject([{ server: 'player', netErrors: 0, wideErrors: null }, { server: 'opponent', netErrors: null, failedReturns: 0 }]);
+    expect(result.bundle.games).toMatchObject([{ server: 'player', netErrors: 0, wideErrors: null }, { server: 'opponent', netErrors: null, failedReturns: 0, unforcedErrors: null, comments: null }]);
     expect(result.bundle).toEqual(await repository.getMatchBundle(match.match.id));
   });
   it('rejects a non-ready draft and preserves it', async () => {
@@ -242,7 +242,7 @@ describe('draft processing', () => {
     const { service, match, repository } = await setup();
     const draft = await service.createDraftFromAudio({ matchId: match.match.id, setId: match.sets[0].id, audio: new Blob(['a']), mimeType: 'audio/mp4' }, new AbortController().signal);
     const save = vi.spyOn(repository, 'saveDraft');
-    await expect(service.updateDraftGame(draft.id, 0, { failedReturns: 0 })).rejects.toThrow();
+    await expect(service.updateDraftGame(draft.id, 0, { failedReturns: 0, unforcedErrors: null, comments: null })).rejects.toThrow();
     await expect(service.updateDraftGame(draft.id, 2, { netErrors: 0 })).rejects.toThrow();
     expect(save).not.toHaveBeenCalled();
     const edited = await service.updateDraftGame(draft.id, 0, { netErrors: null, doubleFaults: 0 });
@@ -251,7 +251,7 @@ describe('draft processing', () => {
   it('does not start processing when the active standard set is awaiting its tie-break', async () => {
     const { service, match, transcriber, repository } = await setup();
     const bundle = structuredClone(match);
-    bundle.games = Array.from({ length: 12 }, (_, i) => ({ id: `game-${i}`, setId: bundle.sets[0].id, ordinal: i + 1, server: i % 2 ? 'opponent' as const : 'player' as const, result: i % 2 ? 'lost' as const : 'won' as const, score: null, netErrors: null, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null, createdAt: clock.now(), updatedAt: clock.now() }));
+    bundle.games = Array.from({ length: 12 }, (_, i) => ({ id: `game-${i}`, setId: bundle.sets[0].id, ordinal: i + 1, server: i % 2 ? 'opponent' as const : 'player' as const, result: i % 2 ? 'lost' as const : 'won' as const, score: null, netErrors: null, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null, unforcedErrors: null, comments: null, createdAt: clock.now(), updatedAt: clock.now() }));
     await repository.saveMatchBundle(bundle);
     await expect(service.createDraftFromAudio({ matchId: match.match.id, setId: match.sets[0].id, audio: new Blob(['a']), mimeType: 'audio/mp4' }, new AbortController().signal)).rejects.toThrow();
     expect(transcriber.transcribe).not.toHaveBeenCalled();
@@ -416,7 +416,7 @@ describe('discarding drafts', () => {
     const { service, match, repository } = await setup();
     const draft = await service.createDraftFromAudio(input(match), new AbortController().signal);
     const bundle = structuredClone(match);
-    bundle.games = Array.from({ length: 6 }, (_, i) => ({ id: `won-${i}`, setId: bundle.sets[0].id, ordinal: i + 1, server: i % 2 ? 'opponent' as const : 'player' as const, result: 'won' as const, score: null, netErrors: null, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null, createdAt: clock.now(), updatedAt: clock.now() }));
+    bundle.games = Array.from({ length: 6 }, (_, i) => ({ id: `won-${i}`, setId: bundle.sets[0].id, ordinal: i + 1, server: i % 2 ? 'opponent' as const : 'player' as const, result: 'won' as const, score: null, netErrors: null, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null, unforcedErrors: null, comments: null, createdAt: clock.now(), updatedAt: clock.now() }));
     bundle.sets[0].status = 'completed'; bundle.sets.push({ ...bundle.sets[0], id: 'set-2', ordinal: 2, status: 'active' });
     await repository.saveMatchBundle(bundle);
     await expect(service.retryDraft(draft.id, new AbortController().signal)).rejects.toMatchObject({ code: 'not-applicable' });
@@ -428,7 +428,7 @@ describe('discarding drafts', () => {
 });
 
 describe('parser context projection', () => {
-  const game = (result: 'won' | 'lost', netErrors: number) => ({ result, netErrors, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null });
+  const game = (result: 'won' | 'lost', netErrors: number) => ({ result, netErrors, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null, unforcedErrors: null, comments: null });
   it('contains only format, set score, game count and expected server', async () => {
     const { repository, match } = await setup();
     const deps = { repository, ids: { next: () => `p-${++n}` }, clock };

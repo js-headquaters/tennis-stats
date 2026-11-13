@@ -60,7 +60,8 @@ const canonical = {
   opponents: (o: Opponent): Opponent => ({ id: o.id, name: o.name, normalizedName: o.normalizedName, createdAt: o.createdAt, updatedAt: o.updatedAt }),
   matches: (m: Match): Match => ({ id: m.id, opponentId: m.opponentId, playedAt: m.playedAt, format: m.format, firstServer: m.firstServer, status: m.status, comments: m.comments, createdAt: m.createdAt, updatedAt: m.updatedAt }),
   sets: (s: TennisSet): TennisSet => ({ id: s.id, matchId: s.matchId, ordinal: s.ordinal, kind: s.kind, status: s.status, tieBreakId: s.tieBreakId, createdAt: s.createdAt, updatedAt: s.updatedAt }),
-  games: (g: Game): Game => ({ id: g.id, setId: g.setId, ordinal: g.ordinal, server: g.server, result: g.result, score: g.score === null ? null : { player: g.score.player, opponent: g.score.opponent }, netErrors: g.netErrors, wideErrors: g.wideErrors, longErrors: g.longErrors, doubleFaults: g.doubleFaults, failedReturns: g.failedReturns, createdAt: g.createdAt, updatedAt: g.updatedAt }),
+  // Backup v1 does not carry unforcedErrors/comments yet; Task 2 adds them with the version bump.
+  games: (g: Game): Game => ({ id: g.id, setId: g.setId, ordinal: g.ordinal, server: g.server, result: g.result, score: g.score === null ? null : { player: g.score.player, opponent: g.score.opponent }, netErrors: g.netErrors, wideErrors: g.wideErrors, longErrors: g.longErrors, doubleFaults: g.doubleFaults, failedReturns: g.failedReturns, createdAt: g.createdAt, updatedAt: g.updatedAt }) as Game,
   tieBreaks: (t: TieBreak): TieBreak => ({ id: t.id, setId: t.setId, kind: t.kind, playerPoints: t.playerPoints, opponentPoints: t.opponentPoints, netErrors: t.netErrors, wideErrors: t.wideErrors, longErrors: t.longErrors, doubleFaults: t.doubleFaults, createdAt: t.createdAt, updatedAt: t.updatedAt }),
 };
 const cmp = (a: string | number, b: string | number) => (a < b ? -1 : a > b ? 1 : 0);
@@ -258,7 +259,8 @@ function validateRecords(data: RawData, sourceVersion: 0 | 1, exportedAt: string
 }
 
 function gameIssues(game: Game): string[] {
-  const result = validateGame(game);
+  // Backup v1 games predate unforcedErrors/comments; Task 2 migrates them properly.
+  const result = validateGame({ ...game, unforcedErrors: game.unforcedErrors ?? null, comments: game.comments ?? null });
   return result.ok ? [] : result.issues.map(issue => `${issue.field}: ${issue.message}`);
 }
 function markDuplicateOrdinals<T extends { ordinal: number }>(items: { value: T }[], parent: (item: T) => string, mark: (c: Candidate<unknown>, reason: string) => void) {

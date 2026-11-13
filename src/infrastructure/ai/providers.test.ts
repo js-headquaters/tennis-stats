@@ -7,7 +7,7 @@ import { redactProviderError, SafeProviderError } from './common';
 
 const key = 'SENTINEL_FAKE_KEY';
 const config = { provider: 'openai' as const, model: 'test', endpoint: '', apiKey: key };
-const draft = { version: 1, games: [{ server: 'player', result: 'won', netErrors: null, wideErrors: 0, longErrors: null, doubleFaults: 0, failedReturns: null }], warnings: [] };
+const draft = { version: 1, games: [{ server: 'player', result: 'won', netErrors: null, wideErrors: 0, longErrors: null, doubleFaults: 0, failedReturns: null, unforcedErrors: null, comments: null }], warnings: [] };
 it('rejects insecure or credential-bearing endpoints before sending keys', async () => {
   for (const endpoint of ['http://example.com/v1', 'http://192.168.1.1/v1', 'https://user:pass@example.com/v1', `https://example.com/v1?key=${key}`, 'https://example.com/v1#secret']) {
     const fetcher = vi.fn();
@@ -43,7 +43,7 @@ it('uses a valid example and explicit enum instructions in both parser prompts',
 });
 it('validates strict drafts and cross-field rules', () => {
   expect(parsedDraftSchema.parse(draft)).toEqual(draft);
-  for (const game of [{ ...draft.games[0], netErrors: -1 }, { ...draft.games[0], wideErrors: 0.5 }, { ...draft.games[0], failedReturns: 0 }, { ...draft.games[0], server: 'opponent', doubleFaults: 0 }, { ...draft.games[0], result: 'maybe' }]) expect(parsedDraftSchema.safeParse({ ...draft, games: [game] }).success).toBe(false);
+  for (const game of [{ ...draft.games[0], netErrors: -1 }, { ...draft.games[0], wideErrors: 0.5 }, { ...draft.games[0], failedReturns: 0, unforcedErrors: null, comments: null }, { ...draft.games[0], server: 'opponent', doubleFaults: 0 }, { ...draft.games[0], result: 'maybe' }]) expect(parsedDraftSchema.safeParse({ ...draft, games: [game] }).success).toBe(false);
 });
 it('sends multipart audio and cancellation signal', async () => {
   const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ text: 'hello' })));

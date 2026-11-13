@@ -23,7 +23,7 @@ afterEach(() => { style.remove(); vi.restoreAllMocks(); vi.resetAllMocks(); repo
 
 const stamp = { createdAt: '2026-01-01', updatedAt: '2026-01-01' };
 function games(setId: string, won: number, lost: number): Game[] {
-  return Array.from({ length: won + lost }, (_, index) => ({ ...stamp, id: `${setId}-g${index}`, setId, ordinal: index + 1, server: 'player' as const, result: index < won ? 'won' as const : 'lost' as const, score: null, netErrors: null, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null }));
+  return Array.from({ length: won + lost }, (_, index) => ({ ...stamp, id: `${setId}-g${index}`, setId, ordinal: index + 1, server: 'player' as const, result: index < won ? 'won' as const : 'lost' as const, score: null, netErrors: null, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null, unforcedErrors: null, comments: null }));
 }
 function bundle(id: string, opponent: string, playedAt: Date, status: MatchStatus, format: MatchFormat, sets: Array<[number, number]>): MatchBundle {
   const setRows = sets.map(([won, lost], index) => ({ ...stamp, id: `${id}-s${index + 1}`, matchId: id, ordinal: index + 1, kind: 'standard' as const, status: Math.max(won, lost) >= 6 ? 'completed' as const : 'unfinished' as const, tieBreakId: null }));

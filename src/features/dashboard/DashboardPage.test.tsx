@@ -55,7 +55,7 @@ type Values = [net: number | null, wide: number | null, long: number | null, df:
 let seq = 0;
 function game(server: Server, [netErrors, wideErrors, longErrors, doubleFaults, failedReturns]: Values): Game {
   const id = `g-${++seq}`;
-  return { id, createdAt: '', updatedAt: '', setId: 's', ordinal: seq, server, result: 'won', score: null, netErrors, wideErrors, longErrors, doubleFaults, failedReturns };
+  return { id, createdAt: '', updatedAt: '', setId: 's', ordinal: seq, server, result: 'won', score: null, netErrors, wideErrors, longErrors, doubleFaults, failedReturns, unforcedErrors: null, comments: null };
 }
 function bundle(id: string, opponent: string, playedAt: Date, status: MatchStatus, games: Game[]): MatchBundle {
   return {

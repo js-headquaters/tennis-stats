@@ -45,6 +45,13 @@ export function gamesPlayedInRange(bundles: readonly MatchBundle[], range: DateR
   });
 }
 
+/** The explicit high-level total wins (even 0); otherwise the sum of recorded detail counts; null when nothing was recorded. */
+export function effectiveUnforcedErrors(game: Pick<Game, 'unforcedErrors' | 'netErrors' | 'wideErrors' | 'longErrors'>): number | null {
+  if (typeof game.unforcedErrors === 'number') return game.unforcedErrors;
+  const components = [game.netErrors, game.wideErrors, game.longErrors];
+  return components.every(component => component === null) ? null : components.reduce<number>((total, component) => total + (component ?? 0), 0);
+}
+
 function isEligible(game: Game, key: StatisticsMetric): boolean {
   if (key === 'failedReturns') return game.server === 'opponent';
   if (key === 'doubleFaults') return game.server === 'player';
@@ -55,11 +62,7 @@ export function calculateMetric(games: readonly Game[], key: StatisticsMetric): 
   let sum = 0;
   let sampleSize = 0;
   for (const game of games) {
-    let value: number | null;
-    if (key === 'unforcedErrors') {
-      const components = [game.netErrors, game.wideErrors, game.longErrors];
-      value = components.every(component => component === null) ? null : components.reduce<number>((total, component) => total + (component ?? 0), 0);
-    } else value = game[key];
+    const value: number | null = key === 'unforcedErrors' ? effectiveUnforcedErrors(game) : game[key];
     if (value === null || !isEligible(game, key)) continue;
     sum += value;
     sampleSize += 1;

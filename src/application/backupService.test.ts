@@ -26,7 +26,7 @@ const ownBundle = (id: string, status: 'active' | 'completed', opponent = { ...s
   opponent,
   match: { ...stamp, id, opponentId: opponent.id, playedAt: '2026-10-01T09:00:00.000Z', format: 'oneSet', firstServer: 'player', status, comments: null },
   sets: [{ ...stamp, id: `${id}-s1`, matchId: id, ordinal: 1, kind: 'standard', status: status === 'active' ? 'active' : 'completed', tieBreakId: null }],
-  games: [{ ...stamp, id: `${id}-g1`, setId: `${id}-s1`, ordinal: 1, server: 'player', result: 'won', score: null, netErrors: 0, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null }],
+  games: [{ ...stamp, id: `${id}-g1`, setId: `${id}-s1`, ordinal: 1, server: 'player', result: 'won', score: null, netErrors: 0, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null, unforcedErrors: null, comments: null }],
   tieBreaks: [],
 });
 const draft = (id: string, matchId: string, setId: string): VoiceDraft => ({ ...stamp, id, matchId, setId, confirmationId: `c-${id}`, dataVersion: 1, recording: new Blob(['secret audio'], { type: 'audio/mp4' }), mimeType: 'audio/mp4', transcripts: [{ text: 'won the game', provider: 'openai', model: 'm', timestamp: 't' }], parsedDraft: null, state: 'ready', error: null });

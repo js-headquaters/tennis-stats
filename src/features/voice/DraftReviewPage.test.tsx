@@ -9,7 +9,7 @@ import DraftReviewPage from './DraftReviewPage';
 import { dependencies } from '../../app/dependencies';
 import { workRegistry } from '../../app/workGuard';
 
-const draft: VoiceDraft = { id:'d', matchId:'m', setId:'s', confirmationId:'c', dataVersion:1, recording:null, mimeType:null, transcripts:[{ text:'Original transcript', provider:'provider', model:'model', timestamp:'now' }], parsedDraft:{ version:1, games:[{ server:'player', result:'won', netErrors:null, wideErrors:0, longErrors:null, doubleFaults:null, failedReturns:null }], warnings:['Check score'] }, state:'ready', error:null, createdAt:'now', updatedAt:'now' };
+const draft: VoiceDraft = { id:'d', matchId:'m', setId:'s', confirmationId:'c', dataVersion:1, recording:null, mimeType:null, transcripts:[{ text:'Original transcript', provider:'provider', model:'model', timestamp:'now' }], parsedDraft:{ version:1, games:[{ server:'player', result:'won', netErrors:null, wideErrors:0, longErrors:null, doubleFaults:null, failedReturns: null, unforcedErrors: null, comments: null }], warnings:['Check score'] }, state:'ready', error:null, createdAt:'now', updatedAt:'now' };
 const style = document.createElement('style'); style.textContent = readFileSync(resolve(process.cwd(), 'src/styles/global.css'), 'utf8'); document.head.append(style);
 const fittingBundle = { match:{ id:'m', status:'active' }, sets:[{ id:'s', matchId:'m', status:'active', kind:'standard', tieBreakId:null }], games:[], tieBreaks:[] };
 it('shows the saved draft without invoking providers or recording and confirms only on click', async () => {
@@ -45,7 +45,7 @@ it('saves zero and null through the service without writing match data', async (
   const { service, repository } = setup(); const card = await screen.findByRole('form', { name:'Draft game 1' });
   fireEvent.change(within(card).getByLabelText('Net errors'), { target:{ value:'0' } });
   fireEvent.click(within(card).getByRole('button', { name:'Save game 1' }));
-  await waitFor(() => expect(service.updateDraftGame).toHaveBeenCalledWith('d', 0, expect.objectContaining({ netErrors:0, longErrors:null, failedReturns:null })));
+  await waitFor(() => expect(service.updateDraftGame).toHaveBeenCalledWith('d', 0, expect.objectContaining({ netErrors:0, longErrors:null, failedReturns: null })));
   expect(service.confirmDraft).not.toHaveBeenCalled(); expect(repository.close).not.toHaveBeenCalled();
 });
 it('retains parsed games after retry failure and locks duplicate retry', async () => {

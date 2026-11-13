@@ -19,7 +19,7 @@ const repos: TennisRepository[] = [];
 afterEach(() => { vi.resetAllMocks(); repos.forEach(repo => repo.close()); repos.length = 0; });
 
 const stamp = { createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' };
-const none = { netErrors: null, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null };
+const none = { netErrors: null, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null, unforcedErrors: null, comments: null };
 function game(setId: string, ordinal: number, result: Game['result'], extra: Partial<Game> = {}): Game {
   const server: Server = ordinal % 2 ? 'player' : 'opponent';
   return { ...stamp, ...none, id: `${setId}-g${ordinal}`, setId, ordinal, server, result, score: null, ...extra };

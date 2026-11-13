@@ -584,4 +584,26 @@ describe('format change structure revalidation', () => {
     expect(preview.conflicts).toEqual(expect.arrayContaining([expect.objectContaining({ type:'structureInvalidated', setId:done.sets[1].id, tieBreakId:done.tieBreaks[0].id })]));
     expect((await updateMatchDetails(done.match.id, { format:'openPractice' }, deps)).conflicts.filter(c => c.type === 'structureInvalidated')).toEqual([]);
   });
+  it('stores high-level stats and normalized comments on add and update', async () => {
+    const deps = await setup(); const initial = await startMatch(input, deps);
+    const base = { result: 'won' as const, netErrors: 4, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null };
+    const added = await addGames(initial.match.id, [{ ...base, unforcedErrors: 1, comments: '  rally  ' }, { ...base, comments: '   ' }], deps);
+    expect(added.games.map(g => [g.unforcedErrors, g.netErrors, g.comments])).toEqual([[1, 4, 'rally'], [null, 4, null]]);
+    const updated = await updateGame(added.games[1].id, { unforcedErrors: 2, comments: ' note ' }, deps);
+    expect(updated.bundle.games[1]).toMatchObject({ unforcedErrors: 2, netErrors: 4, comments: 'note' });
+    const cleared = await updateGame(added.games[1].id, { comments: '  ' }, deps);
+    expect(cleared.bundle.games[1].comments).toBeNull();
+  });
+  it('rejects a 10,001 character game comment without saving', async () => {
+    const deps = await setup(); const initial = await startMatch(input, deps);
+    const base = { result: 'won' as const, netErrors: null, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null };
+    const long = 'x'.repeat(10_001);
+    const save = vi.spyOn(deps.repository, 'saveMatchBundle');
+    await expect(addGames(initial.match.id, [{ ...base, comments: long }], deps)).rejects.toThrow();
+    expect(save).not.toHaveBeenCalled();
+    const added = await addGames(initial.match.id, [{ ...base, comments: 'x'.repeat(10_000) }], deps);
+    save.mockClear();
+    await expect(updateGame(added.games[0].id, { comments: long }, deps)).rejects.toThrow();
+    expect(save).not.toHaveBeenCalled();
+  });
 });
