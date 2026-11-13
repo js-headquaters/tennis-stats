@@ -10,7 +10,10 @@ import type { Game, MatchBundle, RecordedMetric } from './model';
  */
 export interface DateRange { start: Date; end: Date }
 
-export interface MetricSummary { key: RecordedMetric; average: number | null; sampleSize: number }
+export type DashboardMetric = 'unforcedErrors' | 'doubleFaults' | 'failedReturns';
+export type StatisticsMetric = RecordedMetric | DashboardMetric;
+
+export interface MetricSummary { key: StatisticsMetric; average: number | null; sampleSize: number }
 
 export type TrendInsufficientReason = 'noCurrent' | 'noPrevious' | 'noBoth';
 export type MetricTrend =
@@ -18,9 +21,10 @@ export type MetricTrend =
   | { state: 'insufficient'; reason: TrendInsufficientReason };
 
 export interface MetricComparison { current: MetricSummary; previous: MetricSummary; trend: MetricTrend }
-export interface DashboardSummary { metrics: Record<RecordedMetric, MetricComparison> }
+export interface DashboardSummary { metrics: Record<DashboardMetric, MetricComparison> }
 
 export const RECORDED_METRICS: readonly RecordedMetric[] = ['netErrors', 'wideErrors', 'longErrors', 'doubleFaults', 'failedReturns'];
+export const DASHBOARD_METRICS: readonly DashboardMetric[] = ['unforcedErrors', 'doubleFaults', 'failedReturns'];
 
 export function getCalendarPeriod(reference: Date, unit: 'week' | 'month'): DateRange {
   const y = reference.getFullYear();
@@ -41,17 +45,21 @@ export function gamesPlayedInRange(bundles: readonly MatchBundle[], range: DateR
   });
 }
 
-function isEligible(game: Game, key: RecordedMetric): boolean {
+function isEligible(game: Game, key: StatisticsMetric): boolean {
   if (key === 'failedReturns') return game.server === 'opponent';
   if (key === 'doubleFaults') return game.server === 'player';
   return true;
 }
 
-export function calculateMetric(games: readonly Game[], key: RecordedMetric): MetricSummary {
+export function calculateMetric(games: readonly Game[], key: StatisticsMetric): MetricSummary {
   let sum = 0;
   let sampleSize = 0;
   for (const game of games) {
-    const value = game[key];
+    let value: number | null;
+    if (key === 'unforcedErrors') {
+      const components = [game.netErrors, game.wideErrors, game.longErrors];
+      value = components.every(component => component === null) ? null : components.reduce<number>((total, component) => total + (component ?? 0), 0);
+    } else value = game[key];
     if (value === null || !isEligible(game, key)) continue;
     sum += value;
     sampleSize += 1;
@@ -68,8 +76,8 @@ function compare(current: MetricSummary, previous: MetricSummary): MetricTrend {
 }
 
 export function calculateDashboard(current: readonly Game[], previous: readonly Game[]): DashboardSummary {
-  const metrics = {} as Record<RecordedMetric, MetricComparison>;
-  for (const key of RECORDED_METRICS) {
+  const metrics = {} as Record<DashboardMetric, MetricComparison>;
+  for (const key of DASHBOARD_METRICS) {
     const cur = calculateMetric(current, key);
     const prev = calculateMetric(previous, key);
     metrics[key] = { current: cur, previous: prev, trend: compare(cur, prev) };

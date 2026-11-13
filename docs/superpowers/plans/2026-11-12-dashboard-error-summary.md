@@ -43,53 +43,53 @@
 - Consumes: persisted `Game.netErrors`, `Game.wideErrors`, `Game.longErrors`, `Game.doubleFaults`, and `Game.failedReturns`.
 - Produces: `DashboardMetric = 'unforcedErrors' | 'doubleFaults' | 'failedReturns'`, `DASHBOARD_METRICS`, and `calculateMetric(games, key)` summaries for those keys.
 
-- [ ] **Step 1: Write failing domain tests**
+- [x] **Step 1: Write failing domain tests**
 
 Add tests proving that `unforcedErrors` sums net + wide + long per game, treats missing components as zero when another component is known, excludes all-null games, and counts explicit zero. Update dashboard-summary key assertions to the three dashboard metrics while preserving double-fault/failed-return denominator tests.
 
-- [ ] **Step 2: Run domain tests and verify RED**
+- [x] **Step 2: Run domain tests and verify RED**
 
 Run: `npm test -- src/domain/statistics.test.ts`
 
 Expected: FAIL because `unforcedErrors` and the dashboard-only metric set do not exist.
 
-- [ ] **Step 3: Implement the dashboard metric type and derived calculation**
+- [x] **Step 3: Implement the dashboard metric type and derived calculation**
 
 In `src/domain/statistics.ts`, add `DashboardMetric`, export `DASHBOARD_METRICS`, make summary/comparison records use it, and make `calculateMetric(games, 'unforcedErrors')` derive a per-game sum with the spec's null semantics. Keep persisted model types unchanged.
 
-- [ ] **Step 4: Run domain tests and verify GREEN**
+- [x] **Step 4: Run domain tests and verify GREEN**
 
 Run: `npm test -- src/domain/statistics.test.ts`
 
 Expected: all tests pass.
 
-- [ ] **Step 5: Write failing dashboard component tests**
+- [x] **Step 5: Write failing dashboard component tests**
 
 Update tests to require exactly the Unforced errors, Double faults, and Receive errors cards; assert the unforced average/trend/chart use the derived sum; and assert Net/Wide/Long/Failed returns cards are absent.
 
-- [ ] **Step 6: Run dashboard tests and verify RED**
+- [x] **Step 6: Run dashboard tests and verify RED**
 
 Run: `npm test -- src/features/dashboard`
 
 Expected: FAIL because the dashboard still renders five persisted metrics and old labels.
 
-- [ ] **Step 7: Implement the three-card dashboard**
+- [x] **Step 7: Implement the three-card dashboard**
 
 Use `DASHBOARD_METRICS` for summaries/history/rendering. Update `MetricCard` copy and types so `unforcedErrors` reads `Unforced errors` per recorded game and `failedReturns` reads `Receive errors` per return game.
 
-- [ ] **Step 8: Run dashboard tests and verify GREEN**
+- [x] **Step 8: Run dashboard tests and verify GREEN**
 
 Run: `npm test -- src/features/dashboard`
 
 Expected: all tests pass.
 
-- [ ] **Step 9: Run the release gate**
+- [x] **Step 9: Run the release gate**
 
 Run: `npm run typecheck && npm run lint && npm test && npm run build && npm run verify:pwa && npm run test:e2e -- --project=chromium --project=webkit`
 
 Expected: all commands exit 0.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add docs/superpowers/specs/2026-11-12-dashboard-error-summary-design.md docs/superpowers/plans/2026-11-12-dashboard-error-summary.md src/domain/statistics.ts src/domain/statistics.test.ts src/features/dashboard

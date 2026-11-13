@@ -26,7 +26,7 @@ it('shows a prominent resume card and keeps the start action when a match is act
   expect(within(statistics).getByRole('heading', { name: 'Statistics' })).toBeInTheDocument();
   // The resume path comes first (prominent) and the statistics are still fully rendered, not replaced.
   expect(card.compareDocumentPosition(statistics) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(await within(statistics).findAllByRole('article')).toHaveLength(5);
+  expect(await within(statistics).findAllByRole('article')).toHaveLength(3);
   expect(within(card).getByRole('heading', { name: 'Match in progress' })).toBeInTheDocument();
   expect(within(card).getByText('Against Alex')).toBeInTheDocument();
   expect(within(card).getByRole('link', { name: 'Resume match' })).toHaveAttribute('href', '/matches/match-1/live');
@@ -93,26 +93,26 @@ function value(name: string, term: string) {
   return within(card(name)).getByText(term, { selector: 'dt' }).nextElementSibling as HTMLElement;
 }
 
-it('shows per-game averages, sample sizes and neutral trends for the current calendar week', async () => {
+it('shows only unforced, double-fault and receive-error statistics for the current calendar week', async () => {
   show();
   expect(await screen.findByRole('heading', { name: '9–15 Nov 2026' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Week' })).toHaveAttribute('aria-pressed', 'true');
   expect(screen.getByRole('button', { name: 'Month' })).toHaveAttribute('aria-pressed', 'false');
 
-  expect(value('Net errors', 'Average')).toHaveTextContent(/^1$/);
-  expect(value('Net errors', 'Sample')).toHaveTextContent('3 games');
-  expect(value('Net errors', 'Trend')).toHaveTextContent('1 lower than the previous week (2 across 2 games)');
-  expect(value('Wide errors', 'Average')).toHaveTextContent('0.5');
-  expect(value('Wide errors', 'Sample')).toHaveTextContent('2 games');
-  expect(value('Wide errors', 'Trend')).toHaveTextContent('0.5 higher than the previous week (0 across 2 games)');
-  expect(value('Long errors', 'Average')).toHaveTextContent(/^1$/);
-  expect(value('Long errors', 'Trend')).toHaveTextContent('Same as the previous week (1 across 1 game)');
+  expect(screen.getAllByRole('article')).toHaveLength(3);
+  expect(value('Unforced errors', 'Average')).toHaveTextContent(/^2$/);
+  expect(value('Unforced errors', 'Sample')).toHaveTextContent('3 games');
+  expect(value('Unforced errors', 'Trend')).toHaveTextContent('0.5 lower than the previous week (2.5 across 2 games)');
   expect(value('Double faults', 'Average')).toHaveTextContent(/^1$/);
   expect(value('Double faults', 'Sample')).toHaveTextContent('1 service game');
-  expect(value('Failed returns', 'Average')).toHaveTextContent('0.5');
-  expect(value('Failed returns', 'Sample')).toHaveTextContent('2 return games');
-  expect(value('Failed returns', 'Trend')).toHaveTextContent('No comparison: no recorded return games in the previous week');
-  expect(within(card('Net errors')).getByRole('figure', { name: /trend/ })).toBeInTheDocument();
+  expect(value('Receive errors', 'Average')).toHaveTextContent('0.5');
+  expect(value('Receive errors', 'Sample')).toHaveTextContent('2 return games');
+  expect(value('Receive errors', 'Trend')).toHaveTextContent('No comparison: no recorded return games in the previous week');
+  expect(screen.queryByRole('article', { name: 'Net errors' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('article', { name: 'Wide errors' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('article', { name: 'Long errors' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('article', { name: 'Failed returns' })).not.toBeInTheDocument();
+  expect(within(card('Unforced errors')).getByRole('figure', { name: /trend/ })).toBeInTheDocument();
 });
 
 it('navigates to earlier weeks and back to later ones, never past the current week', async () => {
@@ -122,17 +122,16 @@ it('navigates to earlier weeks and back to later ones, never past the current we
 
   fireEvent.click(screen.getByRole('button', { name: 'Previous week' }));
   expect(screen.getByRole('heading', { name: '2–8 Nov 2026' })).toBeInTheDocument();
-  expect(value('Net errors', 'Average')).toHaveTextContent(/^2$/);
-  expect(value('Wide errors', 'Average')).toHaveTextContent(/^0$/);
-  expect(value('Net errors', 'Trend')).toHaveTextContent('No comparison: no recorded games in the previous week');
-  expect(within(value('Failed returns', 'Average')).getByLabelText('unknown')).toHaveTextContent('—');
-  expect(value('Failed returns', 'Sample')).toHaveTextContent('0 return games');
-  expect(value('Failed returns', 'Trend')).toHaveTextContent('No comparison: no recorded return games in the selected or previous week');
+  expect(value('Unforced errors', 'Average')).toHaveTextContent('2.5');
+  expect(value('Unforced errors', 'Trend')).toHaveTextContent('No comparison: no recorded games in the previous week');
+  expect(within(value('Receive errors', 'Average')).getByLabelText('unknown')).toHaveTextContent('—');
+  expect(value('Receive errors', 'Sample')).toHaveTextContent('0 return games');
+  expect(value('Receive errors', 'Trend')).toHaveTextContent('No comparison: no recorded return games in the selected or previous week');
 
   fireEvent.click(screen.getByRole('button', { name: 'Previous week' }));
   expect(screen.getByRole('heading', { name: '26 Oct – 1 Nov 2026' })).toBeInTheDocument();
   // Casey (20 Oct) is in the week before, so only the selected week lacks a sample.
-  expect(value('Net errors', 'Trend')).toHaveTextContent('No comparison: no recorded games in the selected week');
+  expect(value('Unforced errors', 'Trend')).toHaveTextContent('No comparison: no recorded games in the selected week');
 
   fireEvent.click(screen.getByRole('button', { name: 'Next week' }));
   fireEvent.click(screen.getByRole('button', { name: 'Next week' }));
@@ -146,15 +145,15 @@ it('switches to calendar months and compares with the previous month', async () 
   fireEvent.click(screen.getByRole('button', { name: 'Month' }));
   expect(screen.getByRole('button', { name: 'Month' })).toHaveAttribute('aria-pressed', 'true');
   expect(screen.getByRole('heading', { name: 'November 2026' })).toBeInTheDocument();
-  expect(value('Net errors', 'Average')).toHaveTextContent('1.4');
-  expect(value('Net errors', 'Sample')).toHaveTextContent('5 games');
-  expect(value('Net errors', 'Trend')).toHaveTextContent('3.6 lower than the previous month (5 across 1 game)');
+  expect(value('Unforced errors', 'Average')).toHaveTextContent('2.2');
+  expect(value('Unforced errors', 'Sample')).toHaveTextContent('5 games');
+  expect(value('Unforced errors', 'Trend')).toHaveTextContent('2.8 lower than the previous month (5 across 1 game)');
   expect(screen.getByRole('button', { name: 'Next month' })).toBeDisabled();
 
   fireEvent.click(screen.getByRole('button', { name: 'Previous month' }));
   expect(screen.getByRole('heading', { name: 'October 2026' })).toBeInTheDocument();
-  expect(value('Net errors', 'Average')).toHaveTextContent(/^5$/);
-  expect(value('Net errors', 'Sample')).toHaveTextContent('1 game');
+  expect(value('Unforced errors', 'Average')).toHaveTextContent(/^5$/);
+  expect(value('Unforced errors', 'Sample')).toHaveTextContent('1 game');
 
   fireEvent.click(screen.getByRole('button', { name: 'Week' }));
   expect(screen.getByRole('heading', { name: '9–15 Nov 2026' })).toBeInTheDocument();
@@ -165,12 +164,11 @@ it('never shows raw error totals', async () => {
   await screen.findByRole('heading', { name: '9–15 Nov 2026' });
   const statistics = screen.getByRole('region', { name: 'Statistics' });
   expect(statistics).not.toHaveTextContent(/total/i);
-  // Current-week sums: net 3, long 2; the averages are 1 and the sample sizes are "3 games"/"2 games".
-  expect(value('Net errors', 'Average')).not.toHaveTextContent('3');
-  expect(value('Long errors', 'Average')).not.toHaveTextContent('2');
+  // Current-week unforced-error sum is 6; only the average of 2 is shown.
+  expect(value('Unforced errors', 'Average')).not.toHaveTextContent('6');
   fireEvent.click(screen.getByRole('button', { name: 'Month' }));
-  // November net-error sum is 7; only the 1.4 average may appear.
-  expect(statistics).not.toHaveTextContent(/(^|[^.\d])7([^.\d]|$)/);
+  // November unforced-error sum is 11; only the 2.2 average may appear.
+  expect(statistics).not.toHaveTextContent(/(^|[^.\d])11([^.\d]|$)/);
 });
 
 it('lists recent matches newest first below the statistics and shows the active match card', async () => {
@@ -197,8 +195,8 @@ it('does not close an injected repository', async () => {
 it('shows an empty state without implying a trend when nothing is recorded', async () => {
   show(fakeRepository([]));
   await screen.findByRole('heading', { name: '9–15 Nov 2026' });
-  expect(within(value('Net errors', 'Average')).getByLabelText('unknown')).toBeInTheDocument();
-  expect(value('Net errors', 'Trend')).toHaveTextContent('No comparison');
+  expect(within(value('Unforced errors', 'Average')).getByLabelText('unknown')).toBeInTheDocument();
+  expect(value('Unforced errors', 'Trend')).toHaveTextContent('No comparison');
   expect(screen.getByText('No matches recorded yet.')).toBeInTheDocument();
 });
 
@@ -242,8 +240,8 @@ it('shows the resume card and remaining statistics when one match bundle fails t
   show(repository);
   await screen.findByRole('heading', { name: '9–15 Nov 2026' });
   expect(within(screen.getByRole('region', { name: 'Active match' })).getByText('Against Drew')).toBeInTheDocument();
-  expect(value('Net errors', 'Average')).toHaveTextContent(/^1$/);
-  expect(value('Net errors', 'Trend')).toHaveTextContent('No comparison: no recorded games in the previous week');
+  expect(value('Unforced errors', 'Average')).toHaveTextContent(/^2$/);
+  expect(value('Unforced errors', 'Trend')).toHaveTextContent('No comparison: no recorded games in the previous week');
   expect(screen.getByRole('status')).toHaveTextContent('1 match could not be loaded and is not included.');
 });
 
@@ -262,5 +260,5 @@ it('keeps statistics when only the active match fails to load', async () => {
   show(repository);
   await screen.findByRole('heading', { name: '9–15 Nov 2026' });
   expect(screen.getByRole('alert')).toHaveTextContent('Unable to load the active match.');
-  expect(value('Net errors', 'Average')).toHaveTextContent(/^1$/);
+  expect(value('Unforced errors', 'Average')).toHaveTextContent(/^2$/);
 });

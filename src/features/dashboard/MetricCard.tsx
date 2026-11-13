@@ -1,17 +1,14 @@
 import { useId } from 'react';
-import type { RecordedMetric } from '../../domain/model';
-import type { MetricComparison } from '../../domain/statistics';
+import type { DashboardMetric, MetricComparison } from '../../domain/statistics';
 import { countOf, formatAverage } from './format';
 import type { PeriodUnit } from './periods';
 import TrendChart, { type TrendPoint } from './TrendChart';
 
-export const METRIC_COPY: Record<RecordedMetric, { label: string; per: string; noun: string }> = {
-  netErrors: { label: 'Net errors', per: 'per recorded game', noun: 'game' },
-  wideErrors: { label: 'Wide errors', per: 'per recorded game', noun: 'game' },
-  longErrors: { label: 'Long errors', per: 'per recorded game', noun: 'game' },
+export const METRIC_COPY: Record<DashboardMetric, { label: string; per: string; noun: string }> = {
+  unforcedErrors: { label: 'Unforced errors', per: 'per recorded game', noun: 'game' },
   // Double faults only occur in the player's service games, which form the denominator.
   doubleFaults: { label: 'Double faults', per: 'per service game', noun: 'service game' },
-  failedReturns: { label: 'Failed returns', per: 'per return game', noun: 'return game' },
+  failedReturns: { label: 'Receive errors', per: 'per return game', noun: 'return game' },
 };
 
 function trendText({ previous, trend }: MetricComparison, unit: PeriodUnit, noun: string): { glyph: string; text: string } {
@@ -25,7 +22,7 @@ function trendText({ previous, trend }: MetricComparison, unit: PeriodUnit, noun
   return { glyph: trend.direction === 'lower' ? '↓' : '↑', text: `${difference} ${trend.direction} than the previous ${unit} ${was}` };
 }
 
-export default function MetricCard({ metric, unit, comparison, history }: { metric: RecordedMetric; unit: PeriodUnit; comparison: MetricComparison; history: readonly TrendPoint[] }) {
+export default function MetricCard({ metric, unit, comparison, history }: { metric: DashboardMetric; unit: PeriodUnit; comparison: MetricComparison; history: readonly TrendPoint[] }) {
   const id = useId();
   const copy = METRIC_COPY[metric];
   const { average, sampleSize } = comparison.current;

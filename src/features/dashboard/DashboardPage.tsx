@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { dependencies } from '../../app/dependencies';
 import type { Clock, TennisRepository } from '../../application/ports';
 import type { MatchBundle, MatchStatus } from '../../domain/model';
-import { RECORDED_METRICS, calculateDashboard, calculateMetric, gamesPlayedInRange } from '../../domain/statistics';
+import { DASHBOARD_METRICS, calculateDashboard, calculateMetric, gamesPlayedInRange } from '../../domain/statistics';
 import MetricCard from './MetricCard';
 import { formatDay, periodAt, periodLabel, previousPeriod, shortPeriodLabel, type PeriodUnit } from './periods';
 import { matchLivePath, matchPath } from '../../app/routes';
@@ -67,7 +67,7 @@ export default function DashboardPage({ repository, clock }: { repository?: Tenn
     const summary = calculateDashboard(gamesPlayedInRange(bundles, selected), gamesPlayedInRange(bundles, previousPeriod(selected, unit)));
     const ranges = Array.from({ length: HISTORY_LENGTH }, (_, index) => periodAt(reference, unit, offset - (HISTORY_LENGTH - 1 - index)));
     const historyGames = ranges.map(range => gamesPlayedInRange(bundles, range));
-    const history = Object.fromEntries(RECORDED_METRICS.map(key => [key, ranges.map((range, index) => {
+    const history = Object.fromEntries(DASHBOARD_METRICS.map(key => [key, ranges.map((range, index) => {
       const { average, sampleSize } = calculateMetric(historyGames[index], key);
       return { label: periodLabel(range, unit), shortLabel: shortPeriodLabel(range, unit), average, sampleSize };
     })]));
@@ -96,7 +96,7 @@ export default function DashboardPage({ repository, clock }: { repository?: Tenn
           </div>
           {data!.skipped > 0 && <p role="status">{data!.skipped === 1 ? '1 match could not be loaded and is not included.' : `${data!.skipped} matches could not be loaded and are not included.`}</p>}
           <div className="metric-cards">
-            {RECORDED_METRICS.map(key => <MetricCard key={key} metric={key} unit={unit} comparison={view.summary.metrics[key]} history={view.history[key]} />)}
+            {DASHBOARD_METRICS.map(key => <MetricCard key={key} metric={key} unit={unit} comparison={view.summary.metrics[key]} history={view.history[key]} />)}
           </div>
         </>}
     </section>

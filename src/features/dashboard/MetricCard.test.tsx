@@ -4,7 +4,7 @@ import type { MetricComparison } from '../../domain/statistics';
 import MetricCard from './MetricCard';
 
 function comparison(current: [number | null, number], previous: [number | null, number], trend: MetricComparison['trend']): MetricComparison {
-  return { current: { key: 'netErrors', average: current[0], sampleSize: current[1] }, previous: { key: 'netErrors', average: previous[0], sampleSize: previous[1] }, trend };
+  return { current: { key: 'unforcedErrors', average: current[0], sampleSize: current[1] }, previous: { key: 'unforcedErrors', average: previous[0], sampleSize: previous[1] }, trend };
 }
 function value(card: HTMLElement, term: string) {
   const dt = within(card).getByText(term, { selector: 'dt' });
@@ -12,8 +12,8 @@ function value(card: HTMLElement, term: string) {
 }
 
 it('shows average, sample size and neutral comparison against the previous period', () => {
-  render(<MetricCard metric="netErrors" unit="week" comparison={comparison([1.25, 4], [2, 3], { state: 'compared', direction: 'lower', difference: -0.75 })} history={[]} />);
-  const card = screen.getByRole('article', { name: 'Net errors' });
+  render(<MetricCard metric="unforcedErrors" unit="week" comparison={comparison([1.25, 4], [2, 3], { state: 'compared', direction: 'lower', difference: -0.75 })} history={[]} />);
+  const card = screen.getByRole('article', { name: 'Unforced errors' });
   expect(within(card).getByText('per recorded game')).toBeInTheDocument();
   expect(value(card, 'Average')).toHaveTextContent('1.25');
   expect(value(card, 'Sample')).toHaveTextContent('4 games');
@@ -21,9 +21,9 @@ it('shows average, sample size and neutral comparison against the previous perio
   expect(card).not.toHaveTextContent(/improv|better|worse/i);
 });
 
-it('uses return games for failed returns and singular sample wording', () => {
+it('labels failed returns as receive errors and uses return-game samples', () => {
   render(<MetricCard metric="failedReturns" unit="month" comparison={comparison([0, 1], [0, 1], { state: 'compared', direction: 'unchanged', difference: 0 })} history={[]} />);
-  const card = screen.getByRole('article', { name: 'Failed returns' });
+  const card = screen.getByRole('article', { name: 'Receive errors' });
   expect(within(card).getByText('per return game')).toBeInTheDocument();
   expect(value(card, 'Average')).toHaveTextContent(/^0$/);
   expect(value(card, 'Sample')).toHaveTextContent('1 return game');
@@ -39,8 +39,8 @@ it('uses service games for double faults', () => {
 });
 
 it('shows unknown with an accessible label and an explicit no-comparison message', () => {
-  render(<MetricCard metric="wideErrors" unit="week" comparison={comparison([null, 0], [0.5, 2], { state: 'insufficient', reason: 'noCurrent' })} history={[]} />);
-  const card = screen.getByRole('article', { name: 'Wide errors' });
+  render(<MetricCard metric="unforcedErrors" unit="week" comparison={comparison([null, 0], [0.5, 2], { state: 'insufficient', reason: 'noCurrent' })} history={[]} />);
+  const card = screen.getByRole('article', { name: 'Unforced errors' });
   expect(within(value(card, 'Average')).getByLabelText('unknown')).toHaveTextContent('—');
   expect(value(card, 'Sample')).toHaveTextContent('0 games');
   expect(value(card, 'Trend')).toHaveTextContent('No comparison: no recorded games in the selected week');
@@ -51,6 +51,6 @@ it.each([
   ['noPrevious', 'No comparison: no recorded games in the previous week'],
   ['noBoth', 'No comparison: no recorded games in the selected or previous week'],
 ] as const)('words the %s insufficient state neutrally', (reason, text) => {
-  render(<MetricCard metric="longErrors" unit="week" comparison={comparison(reason === 'noBoth' ? [null, 0] : [1, 1], [null, 0], { state: 'insufficient', reason })} history={[]} />);
-  expect(value(screen.getByRole('article', { name: 'Long errors' }), 'Trend')).toHaveTextContent(text);
+  render(<MetricCard metric="unforcedErrors" unit="week" comparison={comparison(reason === 'noBoth' ? [null, 0] : [1, 1], [null, 0], { state: 'insufficient', reason })} history={[]} />);
+  expect(value(screen.getByRole('article', { name: 'Unforced errors' }), 'Trend')).toHaveTextContent(text);
 });

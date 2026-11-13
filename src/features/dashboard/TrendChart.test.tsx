@@ -9,9 +9,9 @@ const points = [
 ];
 
 it('gives the chart an accessible name and a complete text equivalent', async () => {
-  render(<TrendChart title="Net errors per recorded game" sampleNoun="game" points={points} />);
-  const figure = screen.getByRole('figure', { name: 'Net errors per recorded game trend' });
-  const table = within(figure).getByRole('table', { name: 'Net errors per recorded game by period' });
+  render(<TrendChart title="Unforced errors per recorded game" sampleNoun="game" points={points} />);
+  const figure = screen.getByRole('figure', { name: 'Unforced errors per recorded game trend' });
+  const table = within(figure).getByRole('table', { name: 'Unforced errors per recorded game by period' });
   const rows = within(table).getAllByRole('row').slice(1);
   expect(rows.map(row => row.textContent)).toEqual(['26 Oct – 1 Nov 2026—0 games', '2–8 Nov 202602 games','9–15 Nov 20261.51 game']);
   expect(within(rows[0]).getByLabelText('unknown')).toHaveTextContent('—');

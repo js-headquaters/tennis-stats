@@ -1,7 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 import { FIXED_NOW, buildMatchBundle, buildSnapshot, expect, mockAi, readDatabase, seedDatabase, test, type AiMock, type GameSpec } from './fixtures';
 
-// Journey 8 (weekly/monthly error and failed-return averages, unknown vs explicit zero, sample sizes, trend against the
+// Journey 8 (weekly/monthly unforced, double-fault and receive-error averages, unknown vs explicit zero, sample sizes, trend against the
 // previous calendar period, no raw totals) and journey 9 (history newest first, filtered by opponent and date range,
 // completion labels), plus a post-match correction that recalculates the averages while the match stays completed.
 // FIXED_NOW is Saturday 14 March 2026 (UTC browser): the current week is Mon 9 – Sun 15 March, the previous 2–8 March.
@@ -57,22 +57,19 @@ test('@smoke weekly averages use known values only, show sample sizes and the tr
   await expect(periodHeading(page)).toHaveText('9–15 Mar 2026');
   await expect(page.getByRole('button', { name: 'Week', exact: true })).toHaveAttribute('aria-pressed', 'true');
 
-  // Net: (4+0+2+3)/4 — the null is excluded (not /5), the explicit 0 counts (not /3).
-  await expectCard(page, 'Net errors', { average: '2.25', sample: '4 games', trend: '↓ 0.75 lower than the previous week (3 across 2 games)' });
-  // Wide: nothing recorded this week → unknown, never 0.
-  await expectCard(page, 'Wide errors', { average: null, sample: '0 games', trend: 'No comparison: no recorded games in the selected week' });
-  // Long: explicit zeros pull the average down; nothing recorded last week.
-  await expectCard(page, 'Long errors', { average: '0.6', sample: '5 games', trend: 'No comparison: no recorded games in the previous week' });
+  // Unforced errors sum net + wide + long per game; partial metrics count and explicit zeros remain real samples.
+  await expectCard(page, 'Unforced errors', { average: '2.4', sample: '5 games', trend: '↓ 1.1 lower than the previous week (3.5 across 2 games)' });
   // Double faults: service games only, tie-break excluded; last week's explicit 0 is a real comparison baseline.
   await expectCard(page, 'Double faults', { average: '0.5', sample: '2 service games', trend: '↑ 0.5 higher than the previous week (0 across 1 service game)' });
-  // Failed returns per RETURN game.
-  await expectCard(page, 'Failed returns', { average: '1.5', sample: '2 return games', trend: '↓ 0.5 lower than the previous week (2 across 1 return game)' });
-  await expect(card(page, 'Failed returns')).toContainText('per return game');
+  // Receive errors use the existing failed-return values per RETURN game.
+  await expectCard(page, 'Receive errors', { average: '1.5', sample: '2 return games', trend: '↓ 0.5 lower than the previous week (2 across 1 return game)' });
+  await expect(card(page, 'Receive errors')).toContainText('per return game');
+  await expect(page.getByRole('region', { name: 'Statistics' }).getByRole('article')).toHaveCount(3);
 
-  // No raw totals anywhere (this week's net-error total is 9).
+  // No raw totals anywhere (this week's unforced-error total is 12).
   const statistics = page.getByRole('region', { name: 'Statistics' });
   await expect(statistics).not.toContainText(/total/i);
-  await expect(card(page, 'Net errors').locator('.metric-card-stats')).not.toContainText('9');
+  await expect(card(page, 'Unforced errors').locator('.metric-card-stats')).not.toContainText('12');
 });
 
 test('monthly averages, earlier periods and calendar boundaries', async ({ page }) => {
@@ -83,13 +80,13 @@ test('monthly averages, earlier periods and calendar boundaries', async ({ page 
   await page.getByRole('button', { name: 'Previous week' }).click();
   await expect(periodHeading(page)).toHaveText('2–8 Mar 2026');
   await expect(page.getByRole('button', { name: 'Next week' })).toBeEnabled();
-  await expectCard(page, 'Net errors', { average: '3', sample: '2 games', trend: '= Same as the previous week (3 across 3 games)' });
-  await expectCard(page, 'Failed returns', { average: '2', sample: '1 return game', trend: '↑ 2 higher than the previous week (0 across 1 return game)' });
+  await expectCard(page, 'Unforced errors', { average: '3.5', sample: '2 games', trend: '↓ 0.17 lower than the previous week (3.67 across 3 games)' });
+  await expectCard(page, 'Receive errors', { average: '2', sample: '1 return game', trend: '↑ 2 higher than the previous week (0 across 1 return game)' });
   await page.getByRole('button', { name: 'Previous week' }).click();
   await expect(periodHeading(page)).toHaveText('23 Feb – 1 Mar 2026');
-  await expectCard(page, 'Net errors', { average: '3', sample: '3 games', trend: 'No comparison: no recorded games in the previous week' });
+  await expectCard(page, 'Unforced errors', { average: '3.67', sample: '3 games', trend: 'No comparison: no recorded games in the previous week' });
   await page.getByRole('button', { name: 'Next week' }).click();
-  await expectCard(page, 'Wide errors', { average: '1', sample: '1 game', trend: 'No comparison: no recorded games in the previous week' });
+  await expectCard(page, 'Unforced errors', { average: '3.5', sample: '2 games', trend: '↓ 0.17 lower than the previous week (3.67 across 3 games)' });
   await page.getByRole('button', { name: 'Next week' }).click();
   await expect(periodHeading(page)).toHaveText('9–15 Mar 2026');
   await expect(page.getByRole('button', { name: 'Next week' })).toBeDisabled();
@@ -97,17 +94,15 @@ test('monthly averages, earlier periods and calendar boundaries', async ({ page 
   // March: matches a, b, c and e (1 March and 8 March belong to March even though they are earlier weeks); February: d.
   await page.getByRole('button', { name: 'Month', exact: true }).click();
   await expect(periodHeading(page)).toHaveText('March 2026');
-  await expectCard(page, 'Net errors', { average: '2.86', sample: '7 games', trend: '↑ 0.86 higher than the previous month (2 across 2 games)' });
-  await expectCard(page, 'Wide errors', { average: '1', sample: '1 game', trend: 'No comparison: no recorded games in the previous month' });
-  await expectCard(page, 'Long errors', { average: '0.6', sample: '5 games', trend: '↓ 1.4 lower than the previous month (2 across 1 game)' });
+  await expectCard(page, 'Unforced errors', { average: '3', sample: '8 games', trend: '= Same as the previous month (3 across 2 games)' });
   await expectCard(page, 'Double faults', { average: '0.33', sample: '3 service games', trend: 'No comparison: no recorded service games in the previous month' });
-  // February's single failed-return value is an explicit 0: it is a baseline, not "no data".
-  await expectCard(page, 'Failed returns', { average: '1.67', sample: '3 return games', trend: '↑ 1.67 higher than the previous month (0 across 1 return game)' });
+  // February's single receive-error value is an explicit 0: it is a baseline, not "no data".
+  await expectCard(page, 'Receive errors', { average: '1.67', sample: '3 return games', trend: '↑ 1.67 higher than the previous month (0 across 1 return game)' });
 
   await page.getByRole('button', { name: 'Previous month' }).click();
   await expect(periodHeading(page)).toHaveText('February 2026');
-  await expectCard(page, 'Net errors', { average: '2', sample: '2 games', trend: 'No comparison: no recorded games in the previous month' });
-  await expectCard(page, 'Failed returns', { average: '0', sample: '1 return game', trend: 'No comparison: no recorded return games in the previous month' });
+  await expectCard(page, 'Unforced errors', { average: '3', sample: '2 games', trend: 'No comparison: no recorded games in the previous month' });
+  await expectCard(page, 'Receive errors', { average: '0', sample: '1 return game', trend: 'No comparison: no recorded return games in the previous month' });
   await expectCard(page, 'Double faults', { average: null, sample: '0 service games', trend: 'No comparison: no recorded service games in the selected or previous month' });
 });
 
@@ -117,9 +112,8 @@ test('unknown is not averaged as zero, an explicit zero is; a post-match edit re
   ] }] });
   await seedDatabase(page, buildSnapshot({ bundles: [bundle] }), { then: '#/' });
 
-  await expectCard(page, 'Net errors', { average: '2', sample: '1 game', trend: 'No comparison: no recorded games in the previous week' });
-  await expectCard(page, 'Wide errors', { average: '0', sample: '1 game', trend: 'No comparison: no recorded games in the previous week' });
-  await expectCard(page, 'Failed returns', { average: null, sample: '0 return games', trend: 'No comparison: no recorded return games in the selected or previous week' });
+  await expectCard(page, 'Unforced errors', { average: '1', sample: '2 games', trend: 'No comparison: no recorded games in the previous week' });
+  await expectCard(page, 'Receive errors', { average: null, sample: '0 return games', trend: 'No comparison: no recorded return games in the selected or previous week' });
   await expectCard(page, 'Double faults', { average: null, sample: '0 service games', trend: 'No comparison: no recorded service games in the selected or previous week' });
 
   // The match details agree.
@@ -153,8 +147,8 @@ test('unknown is not averaged as zero, an explicit zero is; a post-match edit re
 
   // The dashboard recalculates: (0+4)/2 now that the zero is recorded.
   await page.goto('#/');
-  await expectCard(page, 'Net errors', { average: '2', sample: '2 games', trend: 'No comparison: no recorded games in the previous week' });
-  await expectCard(page, 'Failed returns', { average: '0', sample: '1 return game', trend: 'No comparison: no recorded return games in the previous week' });
+  await expectCard(page, 'Unforced errors', { average: '2', sample: '2 games', trend: 'No comparison: no recorded games in the previous week' });
+  await expectCard(page, 'Receive errors', { average: '0', sample: '1 return game', trend: 'No comparison: no recorded return games in the previous week' });
   await page.goto('#/matches');
   await expect(page.getByRole('list', { name: 'Matches' }).getByRole('listitem').filter({ hasText: 'Alex Example' })).toContainText('Completed');
 });

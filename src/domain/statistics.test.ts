@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { Game, Match, MatchBundle, RecordedMetric } from './model';
-import { calculateDashboard, calculateMetric, gamesPlayedInRange, getCalendarPeriod } from './statistics';
+import type { Game, Match, MatchBundle } from './model';
+import { DASHBOARD_METRICS, calculateDashboard, calculateMetric, gamesPlayedInRange, getCalendarPeriod, type DashboardMetric } from './statistics';
 
 // All dates are built from local-calendar components so assertions hold in any TZ.
 const local = (y: number, m: number, d: number, h = 0, min = 0, s = 0, ms = 0) => new Date(y, m - 1, d, h, min, s, ms);
@@ -71,15 +71,28 @@ describe('gamesPlayedInRange', () => {
     const b = bundle(local(2026, 11, 10), [game({ server: 'player', netErrors: 1, wideErrors: 0, longErrors: 2, doubleFaults: 0 }), game({ server: 'opponent', netErrors: 1, failedReturns: 1 })]);
     b.tieBreaks = [{ id: 'tb', setId: 's1', kind: 'super', playerPoints: 10, opponentPoints: 8, netErrors: 9, wideErrors: 7, longErrors: 5, doubleFaults: 3, createdAt: '', updatedAt: '' }];
     const d = calculateDashboard(gamesPlayedInRange([b], range), []);
-    expect(d.metrics.netErrors.current).toEqual({ key: 'netErrors', average: 1, sampleSize: 2 });
-    expect(d.metrics.wideErrors.current).toEqual({ key: 'wideErrors', average: 0, sampleSize: 1 });
-    expect(d.metrics.longErrors.current).toEqual({ key: 'longErrors', average: 2, sampleSize: 1 });
+    expect(d.metrics.unforcedErrors.current).toEqual({ key: 'unforcedErrors', average: 2, sampleSize: 2 });
     expect(d.metrics.doubleFaults.current).toEqual({ key: 'doubleFaults', average: 0, sampleSize: 1 });
     expect(d.metrics.failedReturns.current).toEqual({ key: 'failedReturns', average: 1, sampleSize: 1 });
   });
 });
 
 describe('calculateMetric', () => {
+  it('sums net, wide and long errors into unforced errors for each recorded game', () => {
+    const summary = calculateMetric([
+      game({ netErrors: 1, wideErrors: 2, longErrors: 3 }),
+      game({ netErrors: 2, wideErrors: 0, longErrors: 1 }),
+    ], 'unforcedErrors');
+    expect(summary).toEqual({ key: 'unforcedErrors', average: 4.5, sampleSize: 2 });
+  });
+  it('sums known unforced-error components and excludes games where every component is unknown', () => {
+    const summary = calculateMetric([
+      game({ netErrors: 2, wideErrors: null, longErrors: 1 }),
+      game({ netErrors: null, wideErrors: null, longErrors: null }),
+      game({ netErrors: 0, wideErrors: null, longErrors: null }),
+    ], 'unforcedErrors');
+    expect(summary).toEqual({ key: 'unforcedErrors', average: 1.5, sampleSize: 2 });
+  });
   it('averages known values per metric with a per-metric denominator', () => {
     const s = calculateMetric([game({ netErrors: 2 }), game({ netErrors: 4 }), game({ netErrors: null }), game({ wideErrors: 9 })], 'netErrors');
     expect(s).toEqual({ key: 'netErrors', average: 3, sampleSize: 2 });
@@ -113,24 +126,26 @@ describe('calculateMetric', () => {
 });
 
 describe('calculateDashboard', () => {
-  const keys: RecordedMetric[] = ['netErrors', 'wideErrors', 'longErrors', 'doubleFaults', 'failedReturns'];
-  it('summarises all five metrics for both periods', () => {
+  const keys: DashboardMetric[] = ['unforcedErrors', 'doubleFaults', 'failedReturns'];
+  it('summarises only the three dashboard metrics for both periods', () => {
     const d = calculateDashboard([game({ netErrors: 1 })], [game({ netErrors: 3 })]);
+    expect(DASHBOARD_METRICS).toEqual(keys);
     expect(keys.every((k) => d.metrics[k].current.key === k)).toBe(true);
-    expect(d.metrics.netErrors.current).toEqual({ key: 'netErrors', average: 1, sampleSize: 1 });
-    expect(d.metrics.netErrors.previous.average).toBe(3);
+    expect(Object.keys(d.metrics)).toEqual(keys);
+    expect(d.metrics.unforcedErrors.current).toEqual({ key: 'unforcedErrors', average: 1, sampleSize: 1 });
+    expect(d.metrics.unforcedErrors.previous.average).toBe(3);
   });
   it('reports lower/higher/unchanged with the signed difference', () => {
-    expect(calculateDashboard([game({ netErrors: 1 })], [game({ netErrors: 3 })]).metrics.netErrors.trend).toEqual({ state: 'compared', direction: 'lower', difference: -2 });
-    expect(calculateDashboard([game({ netErrors: 5 })], [game({ netErrors: 3 })]).metrics.netErrors.trend).toEqual({ state: 'compared', direction: 'higher', difference: 2 });
-    expect(calculateDashboard([game({ netErrors: 3 })], [game({ netErrors: 3 })]).metrics.netErrors.trend).toEqual({ state: 'compared', direction: 'unchanged', difference: 0 });
+    expect(calculateDashboard([game({ netErrors: 1 })], [game({ netErrors: 3 })]).metrics.unforcedErrors.trend).toEqual({ state: 'compared', direction: 'lower', difference: -2 });
+    expect(calculateDashboard([game({ netErrors: 5 })], [game({ netErrors: 3 })]).metrics.unforcedErrors.trend).toEqual({ state: 'compared', direction: 'higher', difference: 2 });
+    expect(calculateDashboard([game({ netErrors: 3 })], [game({ netErrors: 3 })]).metrics.unforcedErrors.trend).toEqual({ state: 'compared', direction: 'unchanged', difference: 0 });
   });
   it('gives an explicit no-comparison state when either period lacks a sample', () => {
-    expect(calculateDashboard([game({ netErrors: 1 })], []).metrics.netErrors.trend).toEqual({ state: 'insufficient', reason: 'noPrevious' });
-    expect(calculateDashboard([], [game({ netErrors: 1 })]).metrics.netErrors.trend).toEqual({ state: 'insufficient', reason: 'noCurrent' });
-    expect(calculateDashboard([], []).metrics.netErrors.trend).toEqual({ state: 'insufficient', reason: 'noBoth' });
+    expect(calculateDashboard([game({ netErrors: 1 })], []).metrics.unforcedErrors.trend).toEqual({ state: 'insufficient', reason: 'noPrevious' });
+    expect(calculateDashboard([], [game({ netErrors: 1 })]).metrics.unforcedErrors.trend).toEqual({ state: 'insufficient', reason: 'noCurrent' });
+    expect(calculateDashboard([], []).metrics.unforcedErrors.trend).toEqual({ state: 'insufficient', reason: 'noBoth' });
   });
   it('treats an average of zero with a sample as a real value', () => {
-    expect(calculateDashboard([game({ netErrors: 0 })], [game({ netErrors: 2 })]).metrics.netErrors.trend).toMatchObject({ state: 'compared', direction: 'lower' });
+    expect(calculateDashboard([game({ netErrors: 0 })], [game({ netErrors: 2 })]).metrics.unforcedErrors.trend).toMatchObject({ state: 'compared', direction: 'lower' });
   });
 });

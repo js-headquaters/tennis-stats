@@ -23,9 +23,9 @@ it('keeps Home usable with text equivalents when the chart chunk fails to load',
 
   const statistics = await screen.findByRole('region', { name: 'Statistics' });
   await screen.findByRole('heading', { name: '9–15 Nov 2026' });
-  expect(await within(statistics).findAllByTestId('trend-chart-unavailable')).toHaveLength(5);
-  expect(within(statistics).getAllByRole('article')).toHaveLength(5);
-  expect(within(statistics).getByRole('table', { name: 'Net errors per recorded game by period' })).toBeInTheDocument();
+  expect(await within(statistics).findAllByTestId('trend-chart-unavailable')).toHaveLength(3);
+  expect(within(statistics).getAllByRole('article')).toHaveLength(3);
+  expect(within(statistics).getByRole('table', { name: 'Unforced errors per recorded game by period' })).toBeInTheDocument();
   expect(within(screen.getByRole('region', { name: 'Active match' })).getByRole('link', { name: 'Resume match' })).toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'Start new match' })).toBeInTheDocument();
 });
