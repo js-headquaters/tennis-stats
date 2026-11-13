@@ -155,6 +155,26 @@ test('unknown is not averaged as zero, an explicit zero is; a post-match edit re
   await expect(page.getByRole('list', { name: 'Matches' }).getByRole('listitem').filter({ hasText: 'Alex Example' })).toContainText('Completed');
 });
 
+test('an explicit unforced total wins over differing details; a legacy details-only game falls back to the detail sum', async ({ page }) => {
+  const bundle = buildMatchBundle({ id: 'x', opponent: 'Alex Example', status: 'completed', format: 'oneSet', playedAt: '2026-03-12T10:00:00.000Z', sets: [{ status: 'unfinished', games: [
+    p('won', { unforcedErrors: 7, netErrors: 1, wideErrors: 1, longErrors: 1 }), // explicit 7, details would give 3
+    o('lost', { netErrors: 2, wideErrors: 1, longErrors: 1 }), // legacy: details only → 4
+  ] }] });
+  await seedDatabase(page, buildSnapshot({ bundles: [bundle] }), { then: '#/' });
+  // (7 + 4) / 2 = 5.5; using only details would give 3.5, using only explicit totals 7.
+  await expectCard(page, 'Unforced errors', { average: '5.5', sample: '2 games', trend: 'No comparison: no recorded games in the previous week' });
+
+  await page.getByRole('link', { name: 'Alex Example' }).click();
+  await expect(page).toHaveURL(/#\/matches\/x$/);
+  const averages = page.getByRole('table', { name: 'Match averages per metric' });
+  await expect(averages.getByRole('row', { name: /Unforced errors/ })).toContainText('5.5');
+  await expect(averages.getByRole('row', { name: /Unforced errors/ })).toContainText('2 games');
+  await expect(page.getByRole('article', { name: 'Game 1', exact: true }).getByTestId('metric-unforcedErrors')).toContainText('7');
+  const legacy = page.getByRole('article', { name: 'Game 2', exact: true }).getByTestId('metric-unforcedErrors');
+  await expect(legacy).toContainText('4');
+  await expect(legacy).toContainText('Derived from details');
+});
+
 test.describe('match history', () => {
   function historySnapshot() {
     return buildSnapshot({ bundles: [

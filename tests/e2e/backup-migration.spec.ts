@@ -245,6 +245,28 @@ test.describe('journey 11: export, clear, import', () => {
     expect(stored.dataVersion).toBe(CURRENT_DATA_VERSION);
     expect(stored.matches.map(m => m.id).sort()).toEqual(['legacy-match-1', 'm2']);
   });
+
+  for (const version of [1, 2] as const) {
+    test(`a version-${version} backup file is imported through the UI; ${version === 1 ? 'games gain null totals and comments' : 'totals and comments are kept exactly'}`, async ({ page }) => {
+      const text = readFileSync(`src/test/fixtures/backup-v${version}.json`, 'utf8');
+      const file = JSON.parse(text) as { data: TennisRecords };
+      await seedDatabase(page, buildSnapshot(), { then: SETTINGS });
+      await chooseFile(page, `backup-v${version}.json`, text);
+      await expect(preview(page)).toContainText(`Backup format version ${version}`);
+      await importFromUi(page, `backup-v${version}.json`, text, 'merge');
+
+      const stored = await readDatabase(page);
+      expect(stored.dataVersion).toBe(CURRENT_DATA_VERSION);
+      for (const entity of ENTITIES) {
+        for (const row of file.data[entity]) {
+          const expected = entity === 'games' && version === 1 ? { ...row, unforcedErrors: null, comments: null } : row;
+          expect(stored[entity], `${entity} from the v${version} file`).toContainEqual(expected);
+        }
+      }
+      const game1 = stored.games.find(g => g.id === 'game-1')!;
+      expect(game1).toMatchObject(version === 1 ? { unforcedErrors: null, comments: null } : { unforcedErrors: 5, comments: 'Windy; long rally' });
+    });
+  }
 });
 
 // ---------------------------------------------------------------------------------------------------------------

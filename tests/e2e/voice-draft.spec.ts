@@ -119,6 +119,54 @@ test('@smoke reviews a mocked batch transcript, corrects it by voice, and commit
   expect(stored.metadata).toEqual([{ key: expect.stringMatching(/^draft-confirmation:/), value: { draftId, matchId: MATCH_ID, confirmedAt: FIXED_NOW } }]);
 });
 
+test('keeps each game comment with its own game through a manual edit, a refinement, a reload and a single confirmation', async ({ page }) => {
+  const MATCH_COMMENT = 'Windy evening; match comment stays untouched';
+  const parsed = [
+    g('player', 'won', { unforcedErrors: 4, doubleFaults: 1, comments: 'Held after a long deuce' }),
+    g('opponent', 'lost', { unforcedErrors: 2, failedReturns: 1, comments: 'Rushed the return' }),
+  ];
+  const ai = await setUp(page, { scenario: { transcript: 'Game one, four unforced errors, held after a long deuce. Game two lost, rushed the return.', games: parsed } });
+  const bundle = buildMatchBundle({ id: MATCH_ID, opponent: 'Alex Example', format: 'oneSet', firstServer: 'player', comments: MATCH_COMMENT });
+  await seedDatabase(page, buildSnapshot({ bundles: [bundle] }), { then: RECORD });
+  const draftId = await recordClip(page);
+  await expect(status(page, 'Ready for review.')).toBeVisible();
+  await expect(draftCard(page, 1).getByLabel('Game comment')).toHaveValue('Held after a long deuce');
+  await expect(draftCard(page, 2).getByLabel('Game comment')).toHaveValue('Rushed the return');
+  await expect(draftCard(page, 1).getByLabel('Unforced errors')).toHaveValue('4');
+
+  // Manual edit of one comment only.
+  await draftCard(page, 2).getByLabel('Game comment').fill('Rushed the return on the backhand');
+  await draftCard(page, 2).getByRole('button', { name: 'Save game 2' }).click();
+  await expect.poll(async () => (await readDatabase(page)).voiceDrafts[0]?.parsedDraft?.games.map(game => game.comments)).toEqual(['Held after a long deuce', 'Rushed the return on the backhand']);
+
+  // Refine by voice: the existing (edited) draft is sent as context; the revision keeps comments with their games.
+  const refined = [parsed[0], { ...parsed[1], comments: 'Rushed the return on the backhand' }, g('player', 'won', { unforcedErrors: 1, doubleFaults: 0, comments: 'Clean hold' })];
+  ai.update({ transcript: 'Add game three, a clean hold with one unforced error.', games: refined });
+  await page.getByRole('button', { name: 'Start recording' }).click();
+  await page.getByRole('button', { name: 'Stop recording' }).click();
+  await expect(page.locator('form.draft-game-card')).toHaveCount(3);
+  expect(ai.callsOf('openai-parser')[1].body).toContain('Rushed the return on the backhand');
+
+  // Reload the review: the draft (with comments) is restored from storage.
+  await page.reload();
+  await expect(page.locator('form.draft-game-card')).toHaveCount(3);
+  await expect(draftCard(page, 1).getByLabel('Game comment')).toHaveValue('Held after a long deuce');
+  await expect(draftCard(page, 2).getByLabel('Game comment')).toHaveValue('Rushed the return on the backhand');
+  await expect(draftCard(page, 3).getByLabel('Game comment')).toHaveValue('Clean hold');
+
+  await page.getByRole('button', { name: 'Confirm and add' }).click();
+  await expect(page).toHaveURL(new RegExp(`${LIVE}$`));
+  const stored = await readDatabase(page);
+  const games = [...stored.games].sort((a, b) => a.ordinal - b.ordinal);
+  expect(games.map(game => [game.ordinal, game.server, game.unforcedErrors, game.comments])).toEqual([
+    [1, 'player', 4, 'Held after a long deuce'], [2, 'opponent', 2, 'Rushed the return on the backhand'], [3, 'player', 1, 'Clean hold'],
+  ]);
+  expect(stored.matches.find(m => m.id === MATCH_ID)!.comments, 'the general match comment is unchanged').toBe(MATCH_COMMENT);
+  expect(stored.voiceDrafts).toEqual([]);
+  expect(stored.metadata.filter(row => row.key.startsWith('draft-confirmation:')).map(row => row.value), 'confirmed exactly once').toEqual([{ draftId, matchId: MATCH_ID, confirmedAt: FIXED_NOW }]);
+  await expect(page.getByRole('article', { name: 'Game 2', exact: true })).toContainText('Rushed the return on the backhand');
+});
+
 test.describe('duplicate confirmation', () => {
   async function confirmedTwice(page: Page, context: BrowserContext) {
     await setUp(page, { scenario: { games: 2 } });

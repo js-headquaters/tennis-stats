@@ -71,6 +71,41 @@ test('@smoke records games manually with inferred servers while AI is unavailabl
   await expect(page.getByRole('article', { name: 'Game 2', exact: true })).toContainText('Player served');
 });
 
+test('records an explicit total, serve metric and comment without details, then adds net/wide/long keeping total and comment', async ({ page }) => {
+  await seedLive(page, { id: 'm1', opponent: 'Alex Example', format: 'oneSet', firstServer: 'player' });
+  await page.getByRole('button', { name: 'Manual game entry' }).click();
+  const form = page.getByRole('form', { name: 'Manual game entry' });
+  await expect(form.locator('details')).not.toHaveJSProperty('open', true); // details stay collapsed by default
+  await form.getByLabel('Unforced errors').fill('5');
+  await form.getByLabel('Double faults').fill('1');
+  await form.getByLabel('Game comment').fill('  Windy, rushed the forehand  ');
+  await form.getByRole('button', { name: 'Add game' }).click();
+  await expect(form).toBeHidden();
+
+  let stored = await readDatabase(page);
+  expect(stored.games).toHaveLength(1);
+  expect(stored.games[0]).toMatchObject({ ordinal: 1, server: 'player', result: 'won', unforcedErrors: 5, doubleFaults: 1, failedReturns: null, netErrors: null, wideErrors: null, longErrors: null, comments: 'Windy, rushed the forehand' });
+  const card = page.getByRole('article', { name: 'Game 1', exact: true });
+  await expect(card.getByTestId('metric-unforcedErrors')).toContainText('5');
+  await expect(card.getByTestId('metric-unforcedErrors')).not.toContainText('Derived from details');
+  await expect(card).toContainText('Windy, rushed the forehand');
+
+  await page.getByRole('button', { name: 'Edit game 1', exact: true }).click();
+  const edit = page.getByRole('form', { name: 'Edit game' });
+  await expect(edit.getByLabel('Unforced errors')).toHaveValue('5');
+  await expect(edit.getByLabel('Game comment')).toHaveValue('Windy, rushed the forehand');
+  await fillGame(edit, { metrics: { 'Net errors': 1, 'Wide errors': 0, 'Long errors': 2 } });
+  await edit.getByRole('button', { name: 'Save game' }).click();
+  await expect(edit).toBeHidden();
+
+  stored = await readDatabase(page);
+  expect(stored.games[0]).toMatchObject({ unforcedErrors: 5, doubleFaults: 1, netErrors: 1, wideErrors: 0, longErrors: 2, comments: 'Windy, rushed the forehand' });
+  await page.reload();
+  await expect(card.getByTestId('metric-unforcedErrors')).toContainText('5');
+  await expect(card.getByTestId('metric-netErrors')).toHaveText('Net errors1');
+  await expect(card).toContainText('Windy, rushed the forehand');
+});
+
 test('offers only the serve metric that applies to the server and clears the other on switching', async ({ page }) => {
   await seedLive(page, { id: 'm1', opponent: 'Alex Example', format: 'oneSet', firstServer: 'player' });
   await page.getByRole('button', { name: 'Manual game entry' }).click();
