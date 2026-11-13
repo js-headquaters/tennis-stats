@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import { getDefaultWorkGuard, getUpdateController, type UpdateController } from '../app/pwa';
 import type { UnsafeWorkGuard, WorkStatus } from '../app/workGuard';
+import { Download, Clock } from 'lucide-react';
+import IconLabel from './IconLabel';
 
 type Props = { controller?: UpdateController; guard?: UnsafeWorkGuard };
 type Status = WorkStatus | 'checking';
@@ -45,8 +47,8 @@ export default function UpdatePrompt({ controller = getUpdateController(), guard
     {reason && <p id={reasonId}>{reason}</p>}
     {failed && <p role="alert">The update could not be applied. Your data is unchanged; try again.</p>}
     <div className="update-actions">
-      <button type="button" disabled={applying || status !== 'safe'} aria-describedby={reason ? reasonId : undefined} onClick={() => void reload()}>Reload to update</button>
-      <button type="button" onClick={() => setDismissed(true)}>Later</button>
+      <button type="button" aria-label="Reload to update" disabled={applying || status !== 'safe'} aria-describedby={reason ? reasonId : undefined} onClick={() => void reload()}><IconLabel icon={Download}>Update</IconLabel></button>
+      <button type="button" onClick={() => setDismissed(true)}><IconLabel icon={Clock}>Later</IconLabel></button>
     </div>
   </section>;
 }

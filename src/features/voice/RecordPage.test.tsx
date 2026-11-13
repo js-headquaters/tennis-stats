@@ -19,7 +19,9 @@ function setup() {
 }
 it('does nothing until start and navigates after stopping a recording', async () => {
   const { recorder, service } = setup();
-  await screen.findByRole('button', { name:'Start recording' });
+  const start = await screen.findByRole('button', { name:'Start recording' });
+  expect(start).toHaveTextContent(/^Record$/);
+  expect(start.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
   expect(recorder.start).not.toHaveBeenCalled(); expect(service.persistDraftFromAudio).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name:'Start recording' }));
   fireEvent.click(await screen.findByRole('button', { name:'Stop recording' }));

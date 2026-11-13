@@ -35,6 +35,8 @@ describe('UpdatePrompt', () => {
     controller.announce();
     expect(screen.getByRole('status')).toHaveTextContent(/an update is available/i);
     await waitFor(async () => expect(await reloadButton()).toBeEnabled());
+    expect(await reloadButton()).toHaveTextContent(/^Update$/);
+    expect((await reloadButton()).querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
     expect(controller.applyUpdate).not.toHaveBeenCalled();
   });

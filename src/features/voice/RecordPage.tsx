@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { CircleStop, Mic, RotateCcw, X } from 'lucide-react';
 import { dependencies } from '../../app/dependencies';
 import type { TennisRepository } from '../../application/ports';
 import type { VoiceDraft } from '../../domain/model';
@@ -7,6 +8,7 @@ import { evaluateSet } from '../../domain/scoring';
 import type { AudioRecorder } from '../../infrastructure/audio/mediaRecorder';
 import { useWorkHold } from '../../app/workGuard';
 import ReadOnlyNotice from '../../components/ReadOnlyNotice';
+import IconLabel from '../../components/IconLabel';
 import { draftPath, matchLivePath } from '../../app/routes';
 
 type Service = { persistDraftFromAudio(input: { matchId: string; setId: string; audio: Blob; mimeType: string }): Promise<Pick<VoiceDraft, 'id' | 'state'>> };
@@ -132,10 +134,10 @@ function RecordContent({ matchId, repository, createRecorder = dependencies.crea
       <p role="status" aria-live="polite">{({ idle:'Ready to record.', 'requesting-permission':'Requesting microphone permission…', recording:'Recording…', stopping:'Stopping recording…', saving:'Saving recording…', error:'Recording unavailable.' } as const)[state]}</p>
       {error && <p role="alert">{error}</p>}
       {readOnly && <ReadOnlyNotice disabled="recording is" />}
-      {unsaved && state === 'error' && <><p>This recording has not been saved yet. Starting a new recording discards it.</p><button onClick={() => void retrySave()}>Retry saving recording</button></>}
-      {(state === 'idle' || state === 'error') && <button disabled={readOnly} onClick={() => void start()}>Start recording</button>}
-      {state === 'recording' && <button onClick={() => void stop()}>Stop recording</button>}
-      {(state === 'requesting-permission' || state === 'recording' || state === 'stopping') && <button onClick={() => void cancel()}>Cancel recording</button>}
+      {unsaved && state === 'error' && <><p>This recording has not been saved yet. Starting a new recording discards it.</p><button aria-label="Retry saving recording" onClick={() => void retrySave()}><IconLabel icon={RotateCcw}>Retry save</IconLabel></button></>}
+      {(state === 'idle' || state === 'error') && <button aria-label="Start recording" disabled={readOnly} onClick={() => void start()}><IconLabel icon={Mic}>Record</IconLabel></button>}
+      {state === 'recording' && <button aria-label="Stop recording" onClick={() => void stop()}><IconLabel icon={CircleStop}>Stop</IconLabel></button>}
+      {(state === 'requesting-permission' || state === 'recording' || state === 'stopping') && <button aria-label="Cancel recording" onClick={() => void cancel()}><IconLabel icon={X}>Cancel</IconLabel></button>}
     </>}
     <p><Link to={matchLivePath(matchId)}>Manual entry</Link> <Link to="/settings">Settings</Link></p>
   </section>;

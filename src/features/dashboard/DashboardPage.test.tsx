@@ -30,7 +30,10 @@ it('shows a prominent resume card and keeps the start action when a match is act
   expect(within(card).getByRole('heading', { name: 'Match in progress' })).toBeInTheDocument();
   expect(within(card).getByText('Against Alex')).toBeInTheDocument();
   expect(within(card).getByRole('link', { name: 'Resume match' })).toHaveAttribute('href', '/matches/match-1/live');
-  expect(screen.getByRole('link', { name: 'Start new match' })).toHaveAttribute('href', '/matches/new');
+  const start = screen.getByRole('link', { name: 'Start new match' });
+  expect(start).toHaveAttribute('href', '/matches/new');
+  expect(start).toHaveTextContent(/^New match$/);
+  expect(start.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
   await waitFor(() => expect(close).toHaveBeenCalled());
 });
 

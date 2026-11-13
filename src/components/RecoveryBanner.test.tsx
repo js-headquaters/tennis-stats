@@ -38,6 +38,9 @@ describe('RecoveryBanner', () => {
     expect(region).toHaveTextContent(diagnostics.message);
     const exportLink = within(region).getByRole('link', { name: 'Export a backup in Settings' });
     expect(exportLink).toHaveAttribute('href', '/settings');
+    expect(exportLink).toHaveTextContent(/^Backup$/);
+    expect(within(region).getByRole('button', { name: 'Copy diagnostics' })).toHaveTextContent(/^Copy$/);
+    expect(within(region).getByRole('button', { name: 'Reload to retry the upgrade' })).toHaveTextContent(/^Retry$/);
     for (const control of [exportLink, within(region).getByRole('button', { name: 'Copy diagnostics' }), within(region).getByRole('button', { name: 'Reload to retry the upgrade' })]) expectTouchTarget(control);
     // No destructive action is offered in recovery mode.
     expect([...within(region).getAllByRole('button'), ...within(region).getAllByRole('link')].map(c => c.textContent).join(' ')).not.toMatch(/reset|delete|clear/i);

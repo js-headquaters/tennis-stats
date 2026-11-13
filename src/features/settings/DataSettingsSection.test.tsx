@@ -46,7 +46,10 @@ it('shows current counts and downloads a versioned backup without keys, with exc
   const repo = await seededRepo(); const { section, transfer, container } = show(repo);
   expect(await section.findByText(/On this device: 2 matches, 2 opponents, 2 sets, 3 games, 1 tie-break, 0 pending voice drafts\./)).toBeInTheDocument();
   expect(section.getByText(/never include API keys, AI provider settings, or pending voice recordings/)).toBeInTheDocument();
-  fireEvent.click(section.getByRole('button', { name: 'Export backup' }));
+  const exportButton = section.getByRole('button', { name: 'Export backup' });
+  expect(exportButton).toHaveTextContent(/^Export$/);
+  expect(exportButton.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+  fireEvent.click(exportButton);
   await waitFor(() => expect(transfer.download).toHaveBeenCalledTimes(1));
   const [fileName, text] = transfer.download.mock.calls[0];
   expect(fileName).toBe('tennis-stats-backup-v1-2026-11-12.json');

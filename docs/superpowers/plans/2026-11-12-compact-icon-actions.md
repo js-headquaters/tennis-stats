@@ -59,12 +59,12 @@
 - Consumes: `IconLabel` from Task 1.
 - Produces: concise visible labels with full `aria-label` values where context was removed.
 
-- [ ] **Step 1: Add failing tests for representative dashboard, match, voice, settings, recovery, and update actions**
-- [ ] **Step 2: Run affected component tests and verify RED**
-- [ ] **Step 3: Apply Lucide icons and concise labels, preserving behavior, full accessible names, loading states, and destructive confirmation stages**
-- [ ] **Step 4: Run affected component tests and verify GREEN**
-- [ ] **Step 5: Run touch-target tests** — `npm test -- src/styles/touchTargets.test.tsx`
-- [ ] **Step 6: Commit** — `git commit -m "feat: add compact icon actions"`
+- [x] **Step 1: Add failing tests for representative dashboard, match, voice, settings, recovery, and update actions**
+- [x] **Step 2: Run affected component tests and verify RED**
+- [x] **Step 3: Apply Lucide icons and concise labels, preserving behavior, full accessible names, loading states, and destructive confirmation stages**
+- [x] **Step 4: Run affected component tests and verify GREEN**
+- [x] **Step 5: Run touch-target tests** — `npm test -- src/styles/touchTargets.test.tsx`
+- [x] **Step 6: Commit** — `git commit -m "feat: add compact icon actions"`
 
 ### Task 3: Combined Release Gate
 

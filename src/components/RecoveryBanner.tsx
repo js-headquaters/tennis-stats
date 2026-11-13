@@ -1,6 +1,8 @@
 import { useId, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { RecoveryStatus } from '../application/ports';
+import { Copy, Download, RefreshCw } from 'lucide-react';
+import IconLabel from './IconLabel';
 
 /** Testable clipboard boundary; the default is the browser clipboard, which may be missing or refuse. */
 export interface ClipboardWriter { writeText(text: string): Promise<void> }
@@ -29,9 +31,9 @@ export default function RecoveryBanner({ status, clipboard = browserClipboard, r
     <p>The app is read-only until this is fixed: starting matches, adding or editing games, recording, importing and clearing data are turned off. Viewing and exporting still work.</p>
     <p>Reason: {status.diagnostics.message}</p>
     <div className="recovery-actions">
-      <Link className="touch-link" to="/settings">Export a backup in Settings</Link>
-      <button type="button" onClick={() => void copyDiagnostics()}>Copy diagnostics</button>
-      <button type="button" onClick={reload}>Reload to retry the upgrade</button>
+      <Link className="touch-link" aria-label="Export a backup in Settings" to="/settings"><IconLabel icon={Download}>Backup</IconLabel></Link>
+      <button type="button" aria-label="Copy diagnostics" onClick={() => void copyDiagnostics()}><IconLabel icon={Copy}>Copy</IconLabel></button>
+      <button type="button" aria-label="Reload to retry the upgrade" onClick={reload}><IconLabel icon={RefreshCw}>Retry</IconLabel></button>
     </div>
     <p role="status">{copy === 'copied' ? 'Diagnostics copied.' : copy === 'failed' ? "Couldn't copy automatically. Select and copy the diagnostics below." : ''}</p>
     {copy === 'failed' && <><label htmlFor={boxId}>Diagnostics</label><textarea id={boxId} readOnly rows={10} value={text} onFocus={event => event.currentTarget.select()} /></>}

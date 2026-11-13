@@ -7,6 +7,8 @@ import { DASHBOARD_METRICS, calculateDashboard, calculateMetric, gamesPlayedInRa
 import MetricCard from './MetricCard';
 import { formatDay, periodAt, periodLabel, previousPeriod, shortPeriodLabel, type PeriodUnit } from './periods';
 import { matchLivePath, matchPath } from '../../app/routes';
+import { ChevronLeft, ChevronRight, Play, Plus, RefreshCw } from 'lucide-react';
+import IconLabel from '../../components/IconLabel';
 
 const HISTORY_LENGTH = 6;
 const RECENT_LIMIT = 5;
@@ -80,8 +82,8 @@ export default function DashboardPage({ repository, clock }: { repository?: Tenn
 
   const statisticsFailed = failed || (data !== undefined && data.bundles === undefined);
   return <section className="dashboard"><h1>Home</h1>
-    {data?.activeFailed && <div><p role="alert">Unable to load the active match.</p><button type="button" onClick={retry}>Retry active match</button></div>}
-    {data?.active && <section aria-label="Active match" className="resume-card"><h2>Match in progress</h2><p>Against {data.active.opponent.name}</p><Link className="action-link" to={matchLivePath(data.active.match.id)}>Resume match</Link></section>}
+    {data?.activeFailed && <div><p role="alert">Unable to load the active match.</p><button type="button" aria-label="Retry active match" onClick={retry}><IconLabel icon={RefreshCw}>Retry</IconLabel></button></div>}
+    {data?.active && <section aria-label="Active match" className="resume-card"><h2>Match in progress</h2><p>Against {data.active.opponent.name}</p><Link className="action-link" to={matchLivePath(data.active.match.id)}><IconLabel icon={Play}>Resume match</IconLabel></Link></section>}
     <section aria-labelledby="statistics-heading" className="dashboard-statistics"><h2 id="statistics-heading">Statistics</h2>
       {statisticsFailed ? <div><p role="alert">Unable to load statistics.</p><button type="button" onClick={retry}>Retry</button></div>
         : !view ? <p>Loading statistics…</p>
@@ -90,9 +92,9 @@ export default function DashboardPage({ repository, clock }: { repository?: Tenn
             {(['week', 'month'] as const).map(value => <button key={value} type="button" aria-pressed={unit === value} onClick={() => chooseUnit(value)}>{value === 'week' ? 'Week' : 'Month'}</button>)}
           </div>
           <div className="period-nav">
-            <button type="button" onClick={() => setOffset(value => value - 1)}>Previous {unit}</button>
+            <button type="button" aria-label={`Previous ${unit}`} onClick={() => setOffset(value => value - 1)}><IconLabel icon={ChevronLeft}>Previous</IconLabel></button>
             <h3 aria-live="polite">{view.label}</h3>
-            <button type="button" disabled={offset >= 0} onClick={() => setOffset(value => Math.min(0, value + 1))}>Next {unit}</button>
+            <button type="button" aria-label={`Next ${unit}`} disabled={offset >= 0} onClick={() => setOffset(value => Math.min(0, value + 1))}><IconLabel icon={ChevronRight}>Next</IconLabel></button>
           </div>
           {data!.skipped > 0 && <p role="status">{data!.skipped === 1 ? '1 match could not be loaded and is not included.' : `${data!.skipped} matches could not be loaded and are not included.`}</p>}
           <div className="metric-cards">
@@ -107,6 +109,6 @@ export default function DashboardPage({ repository, clock }: { repository?: Tenn
         <span>{STATUS_LABEL[match.status]}</span>
       </li>)}</ul>}
     </section>}
-    <Link className="action-link floating-action" to="/matches/new">Start new match</Link>
+    <Link className="action-link floating-action" aria-label="Start new match" to="/matches/new"><IconLabel icon={Plus}>New match</IconLabel></Link>
   </section>;
 }

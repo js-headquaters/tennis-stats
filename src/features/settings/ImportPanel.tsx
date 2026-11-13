@@ -6,6 +6,8 @@ import { count, DISPLAY_ORDER } from './dataLabels';
 import { PreviewReport, ResultReport } from './ImportReport';
 import ReadOnlyNotice from '../../components/ReadOnlyNotice';
 import { isReadOnlyRecoveryError, READ_ONLY_MESSAGE } from '../../application/recovery';
+import { Merge, Replace, X } from 'lucide-react';
+import IconLabel from '../../components/IconLabel';
 
 type Stage =
   | { kind: 'idle' }
@@ -56,9 +58,9 @@ export function ImportPanel({ transfer, exclusive, withRepository, onChanged, re
       {accepted(stage.preview) === 0 && <p>Nothing in this file can be imported.</p>}
       {stage.confirm === null
         ? <div className="data-actions">
-          <button type="button" disabled={stage.plan === null || accepted(stage.preview) === 0} onClick={() => setStage({ ...stage, confirm: 'merge', error: null })}>Merge into current data</button>
-          <button type="button" disabled={accepted(stage.preview) === 0} onClick={() => setStage({ ...stage, confirm: 'replace', error: null })}>Replace current data</button>
-          <button type="button" onClick={cancel}>Cancel import</button>
+          <button type="button" aria-label="Merge into current data" disabled={stage.plan === null || accepted(stage.preview) === 0} onClick={() => setStage({ ...stage, confirm: 'merge', error: null })}><IconLabel icon={Merge}>Merge</IconLabel></button>
+          <button type="button" aria-label="Replace current data" disabled={accepted(stage.preview) === 0} onClick={() => setStage({ ...stage, confirm: 'replace', error: null })}><IconLabel icon={Replace}>Replace</IconLabel></button>
+          <button type="button" aria-label="Cancel import" onClick={cancel}><IconLabel icon={X}>Cancel</IconLabel></button>
         </div>
         : <section aria-label={stage.confirm === 'merge' ? 'Confirm merge' : 'Confirm replace'} className="data-confirm">
           {stage.confirm === 'merge'

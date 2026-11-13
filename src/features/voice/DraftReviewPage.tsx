@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { CircleStop, Mic, Play, RotateCcw, X } from 'lucide-react';
 import { dependencies } from '../../app/dependencies';
 import { draftFitsMatch } from '../../application/draftService';
 import type { TennisRepository } from '../../application/ports';
@@ -9,6 +10,7 @@ import DraftGameCard from './DraftGameCard';
 import { useWorkHold, workRegistry } from '../../app/workGuard';
 import ReadOnlyNotice from '../../components/ReadOnlyNotice';
 import { matchLivePath } from '../../app/routes';
+import IconLabel from '../../components/IconLabel';
 
 type Service = ReturnType<typeof dependencies.createDraftService>;
 type Scheduler = { schedule(action: () => void, delay: number): () => void };
@@ -141,14 +143,14 @@ function ReviewContent({ draftId, repository, createService = dependencies.creat
         {!!draft.parsedDraft?.warnings.length && <><h2>Warnings</h2><ul>{draft.parsedDraft.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></>}
         {draft.parsedDraft && <><h2>Games</h2>{draft.parsedDraft.games.map((game, index) => <DraftGameCard key={index} game={game} index={index} busy={blocked || draft.state !== 'ready'} onUpdate={update} onDirtyChange={dirtyChanged} />)}</>}
         {!!dirty.size && <p>Save or discard your edits before continuing.</p>}
-        {(draft.state === 'waiting-retry' || draft.state === 'error' || draft.state === 'recorded' || draft.state === 'processing') && <button disabled={blocked || !!dirty.size} onClick={() => void retry()}>Retry processing</button>}
-        {draft.state === 'confirming' && <button disabled={blocked || !!dirty.size || !draft.parsedDraft?.games.length} onClick={() => void confirm()}>Resume confirmation</button>}
+        {(draft.state === 'waiting-retry' || draft.state === 'error' || draft.state === 'recorded' || draft.state === 'processing') && <button aria-label="Retry processing" disabled={blocked || !!dirty.size} onClick={() => void retry()}><IconLabel icon={RotateCcw}>Retry</IconLabel></button>}
+        {draft.state === 'confirming' && <button aria-label="Resume confirmation" disabled={blocked || !!dirty.size || !draft.parsedDraft?.games.length} onClick={() => void confirm()}><IconLabel icon={Play}>Resume</IconLabel></button>}
         <h2>Add or correct by voice</h2><p>Record up to two minutes. Recording stops automatically at the limit.</p>
-        {!['requesting', 'recording', 'stopping'].includes(operation) && <button disabled={blocked || !!dirty.size} onClick={() => void start()}>Start recording</button>}
+        {!['requesting', 'recording', 'stopping'].includes(operation) && <button aria-label="Start recording" disabled={blocked || !!dirty.size} onClick={() => void start()}><IconLabel icon={Mic}>Record</IconLabel></button>}
         {operation === 'processing' && <button onClick={cancelProcessing}>Cancel processing</button>}
-        {operation === 'recording' && <button onClick={() => void stop()}>Stop recording</button>}
-        {['requesting', 'recording', 'stopping'].includes(operation) && <button onClick={() => void cancel()}>Cancel recording</button>}
-        <p><button disabled={blocked || !!dirty.size || draft.state !== 'ready' || !draft.parsedDraft?.games.length} onClick={() => void confirm()}>Confirm and add</button></p>
+        {operation === 'recording' && <button aria-label="Stop recording" onClick={() => void stop()}><IconLabel icon={CircleStop}>Stop</IconLabel></button>}
+        {['requesting', 'recording', 'stopping'].includes(operation) && <button aria-label="Cancel recording" onClick={() => void cancel()}><IconLabel icon={X}>Cancel</IconLabel></button>}
+        <p><button aria-label="Confirm and add" disabled={blocked || !!dirty.size || draft.state !== 'ready' || !draft.parsedDraft?.games.length} onClick={() => void confirm()}><IconLabel icon={Play}>Add games</IconLabel></button></p>
         {!stale && discardControls}
       </>}
     </>}

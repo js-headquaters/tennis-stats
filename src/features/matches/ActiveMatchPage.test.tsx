@@ -24,8 +24,13 @@ it('shows context and adds a manual game with zero and unknown metrics', async (
   const { save, data } = setup();
   expect(await screen.findByText(/Alex/)).toBeInTheDocument();
   expect(screen.getByText(/next server: player/i)).toBeInTheDocument();
-  expect(screen.getByRole('link', { name:/voice/i })).toHaveAttribute('href', '/matches/m/record');
-  fireEvent.click(screen.getByRole('button', { name:/manual/i }));
+  const voice = screen.getByRole('link', { name:'Record with voice' });
+  expect(voice).toHaveAttribute('href', '/matches/m/record');
+  expect(voice).toHaveTextContent(/^Record$/);
+  const manual = screen.getByRole('button', { name:'Manual game entry' });
+  expect(manual).toHaveTextContent(/^Manual entry$/);
+  expect(manual.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+  fireEvent.click(manual);
   fireEvent.change(screen.getByLabelText('Net errors'), { target:{ value:'0' } });
   fireEvent.click(screen.getByRole('button', { name:'Add game' }));
   await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
