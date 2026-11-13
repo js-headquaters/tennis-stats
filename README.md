@@ -15,7 +15,7 @@ Primary targets are current iPhone Safari and Chrome on iOS (both WebKit). Curre
 
 ## Voice diagnostics
 
-To help debug voice parsing, each transcription or parsing call to an AI provider is recorded locally next to the match: the transcript, the raw provider response, timestamps, provider and model, and any error. Audio and API keys are never stored (keys are redacted from provider bodies).
+To help debug voice parsing, each transcription or parsing call to an AI provider is recorded locally next to the match: the transcript, the raw provider response, timestamps, provider and model, and any error. Audio and API keys are never stored (the exact configured key is redacted from provider bodies; a provider that echoes only a masked fragment of it may still appear in a stored error body).
 
 - Diagnostics are kept with the match until the match is deleted.
 - They are excluded from backup files.

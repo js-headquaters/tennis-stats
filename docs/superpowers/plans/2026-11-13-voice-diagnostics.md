@@ -175,7 +175,7 @@
 - Modify: `README.md` (short "Voice diagnostics" note: what is stored, that it is excluded from backups, how to download); `docs/superpowers/plans/2026-11-13-voice-diagnostics.md` (tick checkboxes).
 - Test: e2e only if an existing journey breaks.
 
-- [ ] **Step 1: Run** `npm run typecheck && npm run lint && npm test && npm run build && npm run verify:pwa` — expect exit 0.
-- [ ] **Step 2: Run** `npm run test:e2e -- --project=chromium` — expect pass (existing journeys; the Dexie version bump must not break them). Fix regressions only.
-- [ ] **Step 3: Add README note**; confirm no key/audio can reach a row with `grep -rn "apiKey\|Authorization" src/application/draftService.ts src/application/diagnosticsExport.ts` returning nothing.
-- [ ] **Step 4: Commit** `docs: describe voice diagnostics`.
+- [x] **Step 1: Run** `npm run typecheck && npm run lint && npm test && npm run build && npm run verify:pwa` — expect exit 0.
+- [x] **Step 2: Run** `npm run test:e2e -- --project=chromium` — expect pass (existing journeys; the Dexie version bump must not break them). Fix regressions only.
+- [x] **Step 3: Add README note**; confirm no key/audio can reach a row with `grep -rn "apiKey\|Authorization" src/application/draftService.ts src/application/diagnosticsExport.ts` returning nothing.
+- [x] **Step 4: Commit** `docs: describe voice diagnostics`.
