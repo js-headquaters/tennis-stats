@@ -49,6 +49,14 @@ describe('AppShell recovery banner', () => {
 });
 
 describe('AppShell layout', () => {
+  it('shows decorative icons without changing navigation names', () => {
+    render(<MemoryRouter><Routes><Route element={<AppShell loadRecoveryStatus={async () => ({ mode: 'normal' })} />}><Route path="/" element={<p>Home page</p>} /></Route></Routes></MemoryRouter>);
+    const navigation = screen.getByRole('navigation', { name: 'Main navigation' });
+    for (const name of ['Home', 'Matches', 'Settings']) {
+      const link = within(navigation).getByRole('link', { name });
+      expect(link.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    }
+  });
   it('reserves room below the page content for the fixed bottom navigation, so the last control is never covered', async () => {
     const { readFileSync } = await import('node:fs');
     const css = readFileSync(`${process.cwd()}/src/styles/global.css`, 'utf8');

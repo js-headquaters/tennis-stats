@@ -42,10 +42,10 @@
 **Interfaces:**
 - Produces: `IconLabel({ icon, children })`, rendering a Lucide icon with `aria-hidden="true"` and visible text.
 
-- [ ] **Step 1: Add failing tests for decorative icons and icon navigation**
-- [ ] **Step 2: Run focused tests and verify RED** — `npm test -- src/components/IconLabel.test.tsx src/components/AppShell.test.tsx`
-- [ ] **Step 3: Install `lucide-react`, implement `IconLabel`, add Home/Matches/Settings icons, and add shared alignment CSS**
-- [ ] **Step 4: Run focused tests and verify GREEN**
+- [x] **Step 1: Add failing tests for decorative icons and icon navigation**
+- [x] **Step 2: Run focused tests and verify RED** — `npm test -- src/components/IconLabel.test.tsx src/components/AppShell.test.tsx`
+- [x] **Step 3: Install `lucide-react`, implement `IconLabel`, add Home/Matches/Settings icons, and add shared alignment CSS**
+- [x] **Step 4: Run focused tests and verify GREEN**
 
 ### Task 2: Concise Action Labels Across the App
 
