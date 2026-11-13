@@ -3,6 +3,8 @@ import { createOpenAiTranscription } from './openAiTranscription';
 import { createOpenAiParser } from './openAiParser';
 import { createAnthropicParser } from './anthropicParser';
 import { parsedDraftSchema } from './schemas';
+import type { AttemptTrace } from '../../application/ports';
+import { requestPayload } from './parserCommon';
 import { redactProviderError, SafeProviderError } from './common';
 
 const key = 'SENTINEL_FAKE_KEY';
@@ -97,8 +99,6 @@ it('sends only the minimal parser context to both providers, never opponent, com
   }
 });
 
-import type { AttemptTrace } from '../../application/ports';
-import { requestPayload } from './parserCommon';
 function recorder() {
   const calls: Array<[string, ...unknown[]]> = [];
   const trace: AttemptTrace = { target: (...a) => { calls.push(['target', ...a]); }, request: (...a) => { calls.push(['request', ...a]); }, response: (...a) => { calls.push(['response', ...a]); }, httpError: (...a) => { calls.push(['httpError', ...a]); } };
@@ -154,4 +154,17 @@ it('a throwing trace does not change results', async () => {
   await expect(createOpenAiTranscription(config, vi.fn().mockResolvedValue(new Response('x', { status: 429 }))).transcribe(audio, signal, trace)).rejects.toMatchObject({ code: 'rate' });
   await expect(createOpenAiTranscription(config, vi.fn().mockResolvedValue(new Response('not json'))).transcribe(audio, signal, trace)).rejects.toMatchObject({ code: 'invalid-response' });
   await expect(createOpenAiTranscription({ ...config, apiKey: '' }, vi.fn()).transcribe(audio, signal, trace)).rejects.toMatchObject({ code: 'config' });
+});
+it('redacts the API key (raw, JSON-escaped, URL-escaped) from traced bodies', async () => {
+  const odd = 'SENTINEL_FAKE_KEY"x/y'; const cfg = { ...config, apiKey: odd };
+  const echoes = [`bad key ${odd}`, `{"e":${JSON.stringify(odd)}}`, `k=${encodeURIComponent(odd)}`];
+  for (const [status, code] of [[401, 'auth'], [500, 'network'], [200, 'invalid-response']] as const) for (const echo of echoes) {
+    const { calls, trace } = recorder();
+    await expect(createOpenAiTranscription(cfg, vi.fn().mockResolvedValue(new Response(echo, { status }))).transcribe(audio, new AbortController().signal, trace)).rejects.toMatchObject({ code });
+    const dump = JSON.stringify(calls);
+    expect(dump).not.toContain('SENTINEL_FAKE_KEY'); expect(dump).toContain('[redacted]');
+  }
+  const { calls, trace } = recorder();
+  await makeParser('openai', vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: key } }] })))).parse({ transcript: 't' }, new AbortController().signal, trace).catch(() => undefined);
+  expect(JSON.stringify(calls)).not.toContain(key);
 });

@@ -11,14 +11,15 @@ export function validateConfig(config: { apiKey: string; model: string; endpoint
   if (!config.apiKey.trim() || !config.model.trim()) throw new SafeProviderError('config');
   if (config.endpoint) { try { const url = new URL(config.endpoint); if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || config.endpoint.includes('?') || config.endpoint.includes('#')) throw new Error(); } catch { throw new SafeProviderError('config'); } }
 }
-/** Wraps a trace so that a throwing trace method can never change adapter behaviour. */
-export function safeTrace(trace?: AttemptTrace): AttemptTrace | undefined {
+/** Wraps a trace so a throwing method cannot change adapter behaviour, and exact/JSON-escaped/URL-escaped occurrences of `secret` are replaced by `[redacted]` in all text. Adapters wrap once and pass the result on. */
+export function safeTrace(trace?: AttemptTrace, secret?: string): AttemptTrace | undefined {
   if (!trace) return undefined;
+  const forms = secret && secret.length >= 4 ? [...new Set([secret, JSON.stringify(secret).slice(1, -1), encodeURIComponent(secret)])].sort((a, b) => b.length - a.length) : [];
+  const redact = (text: string) => forms.reduce((out, form) => out.split(form).join('[redacted]'), text);
   const guard = <A extends unknown[]>(call: (...args: A) => void) => (...args: A) => { try { call(...args); } catch { /* diagnostics must never affect the provider call */ } };
-  return { target: guard((p: string, m: string) => trace.target(p, m)), request: guard((t: string) => trace.request(t)), response: guard((t: string) => trace.response(t)), httpError: guard((s: number, b: string) => trace.httpError(s, b)) };
+  return { target: guard((p: string, m: string) => trace.target(p, m)), request: guard((t: string) => trace.request(redact(t))), response: guard((t: string) => trace.response(redact(t))), httpError: guard((s: number, b: string) => trace.httpError(s, redact(b))) };
 }
-export async function requestJson(fetcher: typeof fetch, url: string, init: RequestInit, signal: AbortSignal, trace?: AttemptTrace): Promise<unknown> {
-  const t = safeTrace(trace);
+export async function requestJson(fetcher: typeof fetch, url: string, init: RequestInit, signal: AbortSignal, t?: AttemptTrace): Promise<unknown> {
   try {
     const response = await fetcher(url, { ...init, signal, redirect: 'error' });
     if (!response.ok) {
