@@ -22,3 +22,13 @@ export interface MatchBundle { match: Match; opponent: Opponent; sets: TennisSet
 /** The tennis entities (no drafts, no metadata) — the content of a backup and of an insert-only import. */
 export interface TennisRecords { opponents: Opponent[]; matches: Match[]; sets: TennisSet[]; games: Game[]; tieBreaks: TieBreak[] }
 export interface DatabaseSnapshot { dataVersion: number; matches: Match[]; opponents: Opponent[]; sets: TennisSet[]; games: Game[]; tieBreaks: TieBreak[]; voiceDrafts: VoiceDraft[] }
+export interface DiagnosticText { value: string; truncated: boolean; originalLength: number }
+export type DiagnosticOutcome = 'success' | 'error' | 'cancelled' | 'timeout' | 'offline';
+export interface MatchDiagnostic {
+  id: string; matchId: string; setId: string | null; draftId: string | null;
+  phase: 'transcription' | 'parser'; attempt: number;
+  provider: string; model: string; startedAt: string; finishedAt: string;
+  outcome: DiagnosticOutcome;
+  transcript: DiagnosticText | null; request: DiagnosticText | null; response: DiagnosticText | null;
+  error: { code: string; message: string; status?: number; body?: DiagnosticText } | null;
+}
