@@ -121,25 +121,27 @@ test('unknown is not averaged as zero, an explicit zero is; a post-match edit re
   await expect(page).toHaveURL(/#\/matches\/z$/);
   const averages = page.getByRole('table', { name: 'Match averages per metric' });
   const row = (name: RegExp) => averages.getByRole('row', { name });
-  await expect(row(/Net errors/)).toContainText('2');
-  await expect(row(/Net errors/)).toContainText('1 game');
-  await expect(row(/Wide errors/).getByRole('cell').first()).toHaveText('0');
-  await expect(row(/Failed returns/).getByRole('img', { name: 'unknown' })).toBeVisible();
+  // Derived from details: game 1 (wide 0) = 0 and game 2 (net 2) = 2 → average 1 over 2 games.
+  await expect(row(/Unforced errors/)).toContainText('1');
+  await expect(row(/Unforced errors/)).toContainText('2 games');
+  await expect(row(/Receive errors/).getByRole('img', { name: 'unknown' })).toBeVisible();
 
   // Correct after completion: game 1 net errors unknown → 0, game 2 → 4; failed returns recorded as 0.
   const set1 = page.getByRole('region', { name: 'Set 1' });
   const edit = page.getByRole('form', { name: 'Edit game' });
   await set1.getByRole('button', { name: 'Edit game 1', exact: true }).click();
+  if (!(await edit.locator('details').evaluate(el => (el as HTMLDetailsElement).open))) await edit.getByText('Add details').click();
   await edit.getByLabel('Net errors').fill('0');
   await edit.getByRole('button', { name: 'Save game' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Correction saved.' })).toBeVisible();
   await set1.getByRole('button', { name: 'Edit game 2', exact: true }).click();
+  if (!(await edit.locator('details').evaluate(el => (el as HTMLDetailsElement).open))) await edit.getByText('Add details').click();
   await edit.getByLabel('Net errors').fill('4');
-  await edit.getByLabel('Failed returns').fill('0');
+  await edit.getByLabel('Receive errors').fill('0');
   await edit.getByRole('button', { name: 'Save game' }).click();
   await expect(edit).toBeHidden();
-  await expect(row(/Net errors/)).toContainText('2 games');
-  await expect(row(/Failed returns/).getByRole('cell').first()).toHaveText('0');
+  await expect(row(/Unforced errors/)).toContainText('2 games');
+  await expect(row(/Receive errors/).getByRole('cell').first()).toHaveText('0');
 
   const stored = await readDatabase(page);
   expect(stored.matches).toMatchObject([{ id: 'z', status: 'completed' }]);
@@ -151,6 +153,26 @@ test('unknown is not averaged as zero, an explicit zero is; a post-match edit re
   await expectCard(page, 'Receive errors', { average: '0', sample: '1 return game', trend: 'No comparison: no recorded return games in the previous week' });
   await page.goto('#/matches');
   await expect(page.getByRole('list', { name: 'Matches' }).getByRole('listitem').filter({ hasText: 'Alex Example' })).toContainText('Completed');
+});
+
+test('an explicit unforced total wins over differing details; a legacy details-only game falls back to the detail sum', async ({ page }) => {
+  const bundle = buildMatchBundle({ id: 'x', opponent: 'Alex Example', status: 'completed', format: 'oneSet', playedAt: '2026-03-12T10:00:00.000Z', sets: [{ status: 'unfinished', games: [
+    p('won', { unforcedErrors: 7, netErrors: 1, wideErrors: 1, longErrors: 1 }), // explicit 7, details would give 3
+    o('lost', { netErrors: 2, wideErrors: 1, longErrors: 1 }), // legacy: details only → 4
+  ] }] });
+  await seedDatabase(page, buildSnapshot({ bundles: [bundle] }), { then: '#/' });
+  // (7 + 4) / 2 = 5.5; using only details would give 3.5, using only explicit totals 7.
+  await expectCard(page, 'Unforced errors', { average: '5.5', sample: '2 games', trend: 'No comparison: no recorded games in the previous week' });
+
+  await page.getByRole('link', { name: 'Alex Example' }).click();
+  await expect(page).toHaveURL(/#\/matches\/x$/);
+  const averages = page.getByRole('table', { name: 'Match averages per metric' });
+  await expect(averages.getByRole('row', { name: /Unforced errors/ })).toContainText('5.5');
+  await expect(averages.getByRole('row', { name: /Unforced errors/ })).toContainText('2 games');
+  await expect(page.getByRole('article', { name: 'Game 1', exact: true }).getByTestId('metric-unforcedErrors')).toContainText('7');
+  const legacy = page.getByRole('article', { name: 'Game 2', exact: true }).getByTestId('metric-unforcedErrors');
+  await expect(legacy).toContainText('4');
+  await expect(legacy).toContainText('Derived from details');
 });
 
 test.describe('match history', () => {

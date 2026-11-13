@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createMemoryRouter, MemoryRouter, Route, RouterProvider, Routes } from 'react-router-dom';
 import { expect, it, vi } from 'vitest';
 import type { MatchServiceDeps } from '../../application/matchService';
@@ -9,6 +9,7 @@ import { dependencies } from '../../app/dependencies';
 
 const now = '2026-01-01T00:00:00.000Z';
 function fixture(): MatchBundle { return { opponent: { id:'o', name:'Alex', normalizedName:'alex', createdAt:now, updatedAt:now }, match: { id:'m', opponentId:'o', playedAt:now, format:'oneSet', firstServer:'player', status:'active', comments:null, createdAt:now, updatedAt:now }, sets:[{ id:'s', matchId:'m', ordinal:1, kind:'standard', status:'active', tieBreakId:null, createdAt:now, updatedAt:now }], games:[], tieBreaks:[] }; }
+const game = (id: string, server: 'player' | 'opponent', result: 'won' | 'lost') => ({ id, setId:'s', ordinal:1, server, result, score:null, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns:null, unforcedErrors:null, comments:null, createdAt:now, updatedAt:now });
 const normal = () => ({ mode:'normal' as const });
 const readOnly = () => ({ mode:'readOnly' as const, diagnostics:{ code:'newer-data-version' as const, message:'m', failedStep:null, storedDataVersion:3, appDataVersion:2, appVersion:null, errorName:'Error' } });
 function setup(initial?: MatchBundle, getRecoveryStatus: () => RecoveryStatus = normal) {
@@ -31,6 +32,7 @@ it('shows context and adds a manual game with zero and unknown metrics', async (
   expect(manual).toHaveTextContent(/^Game entry$/);
   expect(manual.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
   fireEvent.click(manual);
+  fireEvent.click(screen.getByText('Add details'));
   fireEvent.change(screen.getByLabelText('Net errors'), { target:{ value:'0' } });
   fireEvent.click(screen.getByRole('button', { name:'Add game' }));
   await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
@@ -58,7 +60,7 @@ it('saves comments and confirms finishing the match', async () => {
   await waitFor(() => expect(data().match.status).toBe('completed'));
 });
 it('shows the standard tie-break only at six games all', async () => {
-  const b = fixture(); b.games = Array.from({length:12}, (_,i) => ({ id:`game${i}`, setId:'s', ordinal:i+1, server:i % 2 ? 'opponent' : 'player', result:i % 2 ? 'lost' : 'won', score:null, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns:null, createdAt:now, updatedAt:now }));
+  const b = fixture(); b.games = Array.from({length:12}, (_,i) => ({ id:`game${i}`, setId:'s', ordinal:i+1, server:i % 2 ? 'opponent' : 'player', result:i % 2 ? 'lost' : 'won', score:null, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns: null, unforcedErrors: null, comments: null, createdAt:now, updatedAt:now }));
   const { save, data } = setup(b); expect(await screen.findByRole('form', { name:'Standard tie-break' })).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText('Player points'), { target:{ value:'7' } }); fireEvent.change(screen.getByLabelText('Opponent points'), { target:{ value:'5' } });
   fireEvent.click(screen.getByRole('button', { name:'Complete tie-break' })); await waitFor(() => expect(save).toHaveBeenCalledTimes(1)); expect(data().tieBreaks[0].playerPoints).toBe(7);
@@ -68,9 +70,9 @@ it('shows a super tie-break prompt for a deciding set', async () => {
   expect(await screen.findByRole('form', { name:'Super tie-break' })).toBeInTheDocument();
 });
 it('edits a non-disruptive metric immediately', async () => {
-  const b = fixture(); b.games = [{ id:'g1', setId:'s', ordinal:1, server:'player', result:'won', score:null, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns:null, createdAt:now, updatedAt:now }];
+  const b = fixture(); b.games = [{ id:'g1', setId:'s', ordinal:1, server:'player', result:'won', score:null, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns: null, unforcedErrors: null, comments: null, createdAt:now, updatedAt:now }];
   const { save, data } = setup(b); await screen.findByText(/Alex/);
-  fireEvent.click(screen.getByRole('button', { name:'Edit game 1' })); fireEvent.change(screen.getByLabelText('Net errors'), { target:{ value:'2' } });
+  fireEvent.click(screen.getByRole('button', { name:'Edit game 1' })); fireEvent.click(screen.getByText('Add details')); fireEvent.change(screen.getByLabelText('Net errors'), { target:{ value:'2' } });
   fireEvent.click(screen.getByRole('button', { name:'Save game' })); await waitFor(() => expect(save).toHaveBeenCalledTimes(1)); expect(data().games[0].netErrors).toBe(2);
 });
 it('offers retry when loading fails', async () => {
@@ -79,12 +81,63 @@ it('offers retry when loading fails', async () => {
   render(<MemoryRouter initialEntries={['/matches/m/live']}><Routes><Route path="/matches/:matchId/live" element={<ActiveMatchPage deps={deps} />} /></Routes></MemoryRouter>);
   expect(await screen.findByRole('alert')).toHaveTextContent('offline'); fireEvent.click(screen.getByRole('button', { name:'Retry' })); expect(await screen.findByText(/Alex/)).toBeInTheDocument(); expect(get).toHaveBeenCalledTimes(2);
 });
-it('rejects server-specific metrics before saving', async () => {
-  const { save } = setup(); await screen.findByText(/Alex/);
+it('shows high-level fields first with net/wide/long inside collapsed Add details', async () => {
+  setup(); await screen.findByText(/Alex/);
   fireEvent.click(screen.getByRole('button', { name:/manual/i }));
-  fireEvent.change(screen.getByLabelText('Failed returns'), { target:{ value:'0' } });
+  const form = screen.getByRole('form', { name:'Manual game entry' });
+  expect(within(form).getByLabelText('Unforced errors')).toBeVisible();
+  expect(within(form).getByLabelText('Double faults')).toBeVisible();
+  expect(within(form).queryByLabelText('Receive errors')).not.toBeInTheDocument();
+  expect(within(form).getByLabelText('Game comment')).toBeVisible();
+  const details = within(form).getByText('Add details').closest('details')!;
+  expect(details).not.toHaveAttribute('open');
+  for (const label of ['Net errors', 'Wide errors', 'Long errors']) expect(details).toContainElement(within(form).getByLabelText(label));
+});
+it('opens Add details when editing a game with any recorded detail', async () => {
+  const b = fixture(); b.games = [{ ...game('g1', 'player', 'won'), wideErrors: 0 }];
+  setup(b); await screen.findByText(/Alex/);
+  fireEvent.click(screen.getByRole('button', { name:'Edit game 1' }));
+  expect(screen.getByText('Add details').closest('details')).toHaveAttribute('open');
+});
+it('keeps Add details closed when editing a game without details', async () => {
+  const b = fixture(); b.games = [{ ...game('g1', 'player', 'won'), unforcedErrors: 3 }];
+  setup(b); await screen.findByText(/Alex/);
+  fireEvent.click(screen.getByRole('button', { name:'Edit game 1' }));
+  expect(screen.getByText('Add details').closest('details')).not.toHaveAttribute('open');
+  expect(screen.getByLabelText('Unforced errors')).toHaveValue(3);
+});
+it('clears only the now-inapplicable serve metric when the server changes', async () => {
+  const b = fixture(); b.games = [{ ...game('g1', 'player', 'won'), unforcedErrors: 4, doubleFaults: 2, netErrors: 1, comments: 'windy' }];
+  const { save, data } = setup(b); await screen.findByText(/Alex/);
+  fireEvent.click(screen.getByRole('button', { name:'Edit game 1' }));
+  expect(screen.getByLabelText('Double faults')).toHaveValue(2);
+  fireEvent.change(screen.getByLabelText('Server'), { target:{ value:'opponent' } });
+  expect(screen.queryByLabelText('Double faults')).not.toBeInTheDocument();
+  expect(screen.getByLabelText('Receive errors')).toHaveValue(null);
+  expect(screen.getByLabelText('Unforced errors')).toHaveValue(4); expect(screen.getByLabelText('Net errors')).toHaveValue(1); expect(screen.getByLabelText('Game comment')).toHaveValue('windy');
+  fireEvent.click(screen.getByRole('button', { name:'Save game' }));
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+  expect(data().games[0]).toMatchObject({ server:'opponent', doubleFaults:null, failedReturns:null, unforcedErrors:4, netErrors:1, comments:'windy' });
+});
+it('submits a trimmed comment with high-level and detail values, distinguishing zero from blank', async () => {
+  const { save, data } = setup(); await screen.findByText(/Alex/);
+  fireEvent.click(screen.getByRole('button', { name:/manual/i }));
+  fireEvent.change(screen.getByLabelText('Unforced errors'), { target:{ value:'0' } });
+  fireEvent.change(screen.getByLabelText('Double faults'), { target:{ value:'2' } });
+  fireEvent.click(screen.getByText('Add details'));
+  fireEvent.change(screen.getByLabelText('Wide errors'), { target:{ value:'0' } });
+  fireEvent.change(screen.getByLabelText('Long errors'), { target:{ value:'3' } });
+  fireEvent.change(screen.getByLabelText('Game comment'), { target:{ value:'  slice worked  ' } });
   fireEvent.click(screen.getByRole('button', { name:'Add game' }));
-  expect(screen.getByRole('alert')).toHaveTextContent(/failed returns apply to opponent service/i); expect(save).not.toHaveBeenCalled();
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+  expect(data().games[0]).toMatchObject({ unforcedErrors:0, doubleFaults:2, failedReturns:null, netErrors:null, wideErrors:0, longErrors:3, comments:'slice worked' });
+});
+it('constrains counts to whole numbers and comments to the maximum length', async () => {
+  setup(); await screen.findByText(/Alex/);
+  fireEvent.click(screen.getByRole('button', { name:/manual/i }));
+  const unforced = screen.getByLabelText('Unforced errors');
+  expect(unforced).toHaveAttribute('min', '0'); expect(unforced).toHaveAttribute('step', '1');
+  expect(screen.getByLabelText('Game comment')).toHaveAttribute('maxlength', '10000');
 });
 it('ends a set early only after confirmation', async () => {
   const { save, data } = setup(); await screen.findByText(/Alex/);
@@ -100,7 +153,7 @@ it('shows a not-found state with retry', async () => {
 it('shows the correct next server after a standard tie-break', async () => {
   const b = fixture(); b.match.format = 'openPractice'; b.sets[0].status = 'completed'; b.sets[0].tieBreakId = 'tb';
   b.sets.push({ ...b.sets[0], id:'s2', ordinal:2, status:'active', tieBreakId:null });
-  b.games = Array.from({length:12}, (_,i) => ({ id:`game${i}`, setId:'s', ordinal:i+1, server:i % 2 ? 'opponent' : 'player', result:i % 2 ? 'lost' : 'won', score:null, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns:null, createdAt:now, updatedAt:now }));
+  b.games = Array.from({length:12}, (_,i) => ({ id:`game${i}`, setId:'s', ordinal:i+1, server:i % 2 ? 'opponent' : 'player', result:i % 2 ? 'lost' : 'won', score:null, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns: null, unforcedErrors: null, comments: null, createdAt:now, updatedAt:now }));
   b.tieBreaks = [{ id:'tb', setId:'s', kind:'standard', playerPoints:7, opponentPoints:5, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, createdAt:now, updatedAt:now }];
   setup(b); expect(await screen.findByText(/next server: opponent/i)).toBeInTheDocument();
 });
@@ -132,7 +185,7 @@ it('closes each owned repository once on failed load and retry, but not injected
 it('lists downstream set, tie-break and game identifiers in correction confirmation', async () => {
   const b = fixture(); b.match.format = 'openPractice'; b.sets[0].status = 'completed';
   b.sets.push({ ...b.sets[0], id:'later-set', ordinal:2, tieBreakId:'later-tie' });
-  b.games = [...Array.from({length:6}, (_,i) => ({ id:`first${i}`, setId:'s', ordinal:i+1, server:i % 2 ? 'opponent' as const : 'player' as const, result:'won' as const, score:null, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns:null, createdAt:now, updatedAt:now })), { id:'later-game', setId:'later-set', ordinal:1, server:'player', result:'won', score:null, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns:null, createdAt:now, updatedAt:now }];
+  b.games = [...Array.from({length:6}, (_,i) => ({ id:`first${i}`, setId:'s', ordinal:i+1, server:i % 2 ? 'opponent' as const : 'player' as const, result:'won' as const, score:null, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns: null, unforcedErrors: null, comments: null, createdAt:now, updatedAt:now })), { id:'later-game', setId:'later-set', ordinal:1, server:'player', result:'won', score:null, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns: null, unforcedErrors: null, comments: null, createdAt:now, updatedAt:now }];
   b.tieBreaks = [{ id:'later-tie', setId:'later-set', kind:'standard', playerPoints:7, opponentPoints:5, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, createdAt:now, updatedAt:now }];
   const { save } = setup(b); await screen.findByText(/Alex/); fireEvent.click(screen.getAllByRole('button', { name:'Delete game 1' })[1]);
   const region = await screen.findByRole('region', { name:/affected records/i });
@@ -142,7 +195,7 @@ it('lists downstream set, tie-break and game identifiers in correction confirmat
 it.each(['update', 'delete'] as const)('shows same-set tie-break and later games before %s confirmation', async operation => {
   const b = fixture(); b.match.format = 'openPractice'; b.sets[0].status = 'completed'; b.sets[0].tieBreakId = 'same-tie';
   b.sets.push({ ...b.sets[0], id:'next-set', ordinal:2, status:'active', tieBreakId:null });
-  b.games = Array.from({length:12}, (_,i) => ({ id:`same-game-${i+1}`, setId:'s', ordinal:i+1, server:i % 2 ? 'opponent' : 'player', result:i % 2 ? 'lost' : 'won', score:null, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns:null, createdAt:now, updatedAt:now }));
+  b.games = Array.from({length:12}, (_,i) => ({ id:`same-game-${i+1}`, setId:'s', ordinal:i+1, server:i % 2 ? 'opponent' : 'player', result:i % 2 ? 'lost' : 'won', score:null, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns: null, unforcedErrors: null, comments: null, createdAt:now, updatedAt:now }));
   b.tieBreaks = [{ id:'same-tie', setId:'s', kind:'standard', playerPoints:7, opponentPoints:5, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, createdAt:now, updatedAt:now }];
   const { save, data } = setup(b); await screen.findByText(/Alex/);
   if (operation === 'update') { fireEvent.click(screen.getByRole('button', { name:'Edit game 2' })); fireEvent.change(screen.getByLabelText('Result'), { target:{ value:'won' } }); fireEvent.click(screen.getByRole('button', { name:'Save game' })); }
@@ -159,7 +212,7 @@ it('identifies every game after early completion in correction confirmation', as
   const b = fixture(); b.match.format = 'openPractice'; b.sets[0].status = 'completed';
   b.sets.push({ ...b.sets[0], id:'next-set', ordinal:2, status:'active' });
   const results = ['won','lost','won','lost','won','lost','won','lost','won','won'] as const;
-  b.games = results.map((result,i) => ({ id:`chronology-${i+1}`, setId:'s', ordinal:i+1, server:i % 2 ? 'opponent' : 'player', result, score:null, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns:null, createdAt:now, updatedAt:now }));
+  b.games = results.map((result,i) => ({ id:`chronology-${i+1}`, setId:'s', ordinal:i+1, server:i % 2 ? 'opponent' : 'player', result, score:null, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns: null, unforcedErrors: null, comments: null, createdAt:now, updatedAt:now }));
   const { save } = setup(b); await screen.findByText(/Alex/); fireEvent.click(screen.getByRole('button', { name:'Edit game 2' }));
   fireEvent.change(screen.getByLabelText('Result'), { target:{ value:'won' } }); fireEvent.click(screen.getByRole('button', { name:'Save game' }));
   const region = await screen.findByRole('region', { name:/affected records/i }); expect(region).toHaveTextContent('chronology-10'); expect(save).not.toHaveBeenCalled();
@@ -169,13 +222,13 @@ it('shows both post-completion games and server warnings after deleting an earli
   const b = fixture(); b.match.format = 'openPractice'; b.sets[0].status = 'completed';
   b.sets.push({ ...b.sets[0], id:'next-set', ordinal:2, status:'active' });
   const results = ['won','won','won','lost','won','lost','won','lost','won','won','won'] as const;
-  b.games = results.map((result,i) => ({ id:`post-${i+1}`, setId:'s', ordinal:i+1, server:i % 2 ? 'opponent' : 'player', result, score:null, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns:null, createdAt:now, updatedAt:now }));
+  b.games = results.map((result,i) => ({ id:`post-${i+1}`, setId:'s', ordinal:i+1, server:i % 2 ? 'opponent' : 'player', result, score:null, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns: null, unforcedErrors: null, comments: null, createdAt:now, updatedAt:now }));
   const { save } = setup(b); await screen.findByText(/Alex/); fireEvent.click(screen.getByRole('button', { name:'Delete game 4' }));
   const region = await screen.findByRole('region', { name:/affected records/i }); expect(region).toHaveTextContent('post-10'); expect(region).toHaveTextContent('post-11'); expect(region).toHaveTextContent('expected server shifts'); expect(save).not.toHaveBeenCalled();
 });
 it('in read-only recovery mode explains that editing is off and disables every write action', async () => {
   const base = fixture();
-  const withGame: MatchBundle = { ...base, games:[{ id:'g1', setId:'s', ordinal:1, server:'player', result:'won', score:null, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns:null, createdAt:now, updatedAt:now }] };
+  const withGame: MatchBundle = { ...base, games:[{ id:'g1', setId:'s', ordinal:1, server:'player', result:'won', score:null, netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns: null, unforcedErrors: null, comments: null, createdAt:now, updatedAt:now }] };
   const { save } = setup(withGame, readOnly);
   expect(await screen.findByText(/Alex/)).toBeInTheDocument();
   expect(screen.getByText(/read-only recovery mode/i)).toHaveTextContent(/adding or editing games, recording and finishing the match are turned off/i);

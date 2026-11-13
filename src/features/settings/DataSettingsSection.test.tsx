@@ -52,10 +52,10 @@ it('shows current counts and downloads a versioned backup without keys, with exc
   fireEvent.click(exportButton);
   await waitFor(() => expect(transfer.download).toHaveBeenCalledTimes(1));
   const [fileName, text] = transfer.download.mock.calls[0];
-  expect(fileName).toBe('tennis-stats-backup-v1-2026-11-12.json');
-  expect(JSON.parse(text)).toMatchObject({ format: 'tennis-stats-backup', version: 1, exportedAt: '2026-11-12T20:15:00.000Z' });
+  expect(fileName).toBe('tennis-stats-backup-v2-2026-11-12.json');
+  expect(JSON.parse(text)).toMatchObject({ format: 'tennis-stats-backup', version: 2, exportedAt: '2026-11-12T20:15:00.000Z' });
   expect(text).not.toContain(SENTINEL); expect(text).not.toMatch(/apiKey|parser|transcription/i);
-  const status = await section.findByText(/Backup saved as tennis-stats-backup-v1-2026-11-12\.json/);
+  const status = await section.findByText(/Backup saved as tennis-stats-backup-v2-2026-11-12\.json/);
   expect(status).toHaveTextContent('It does not include API keys, AI provider settings, or pending voice recordings and drafts.');
   expect(container.textContent).not.toContain(SENTINEL);
 });
@@ -130,7 +130,7 @@ it('shows merge conflicts before applying and requires an explicit confirmation'
 
 it('replaces only after a confirmation that warns about overwriting and discarded drafts, then shows fresh counts', async () => {
   const repo = await seededRepo();
-  const draft: VoiceDraft = { id: 'd1', matchId: 'gone', setId: '', createdAt: 't', updatedAt: 't', confirmationId: 'c', dataVersion: 1, recording: new Blob(['a']), mimeType: 'audio/mp4', transcripts: [], parsedDraft: null, state: 'ready', error: null };
+  const draft: VoiceDraft = { id: 'd1', matchId: 'gone', setId: '', createdAt: 't', updatedAt: 't', confirmationId: 'c', dataVersion: 2, recording: new Blob(['a']), mimeType: 'audio/mp4', transcripts: [], parsedDraft: null, state: 'ready', error: null };
   const only = JSON.parse(v1Text); const keep = only.data.matches.find((m: { status: string }) => m.status === 'completed');
   only.data.matches = [keep]; only.data.sets = only.data.sets.filter((s: { matchId: string }) => s.matchId === keep.id);
   const setIds = new Set(only.data.sets.map((s: { id: string }) => s.id));

@@ -11,7 +11,7 @@ import type { TennisRecords } from '../../src/domain/model';
 // Every backup goes through the real Settings → Data UI: the Export button's download and the file input.
 
 const SETTINGS = '#/settings';
-const FILE_NAME = 'tennis-stats-backup-v1-2026-03-14.json'; // FIXED_NOW is 2026-03-14 (UTC)
+const FILE_NAME = 'tennis-stats-backup-v2-2026-03-14.json'; // FIXED_NOW is 2026-03-14 (UTC)
 const ENTITIES = ['opponents', 'matches', 'sets', 'games', 'tieBreaks'] as const;
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -43,7 +43,7 @@ function populatedBundles() {
 }
 const SENTINEL_TRANSCRIPT = 'SENTINEL-DRAFT-TRANSCRIPT never belongs in a backup';
 const pendingDraft: SeedDraft = {
-  id: 'draft-1', matchId: 'm3', setId: 'm3-set-1', confirmationId: 'c-1', dataVersion: 1, recording: null, mimeType: null,
+  id: 'draft-1', matchId: 'm3', setId: 'm3-set-1', confirmationId: 'c-1', dataVersion: 2, recording: null, mimeType: null,
   transcripts: [{ text: SENTINEL_TRANSCRIPT, provider: 'openai', model: 'gpt-transcribe', timestamp: FIXED_NOW }], parsedDraft: null,
   state: 'waiting-retry', error: { code: 'offline', message: 'Waiting for an internet connection.', phase: 'parser' }, createdAt: FIXED_NOW, updatedAt: FIXED_NOW,
 };
@@ -53,6 +53,10 @@ function populatedSnapshot() { return buildSnapshot({ bundles: populatedBundles(
 /** Tennis records in id order (the comparison form for readDatabase output). */
 function records(source: Pick<StoredSnapshot, typeof ENTITIES[number]> | TennisRecords) {
   return Object.fromEntries(ENTITIES.map(entity => [entity, sortById(source[entity] as Array<{ id: string }>)])) as unknown as TennisRecords;
+}
+/** Unmigrated games export with the new keys normalized to null (nothing else is invented). */
+function withNormalizedGames(source: TennisRecords): TennisRecords {
+  return { ...source, games: source.games.map(g => ({ ...g, unforcedErrors: g.unforcedErrors ?? null, comments: g.comments ?? null })) };
 }
 function counts(source: TennisRecords) { return Object.fromEntries(ENTITIES.map(entity => [entity, source[entity].length])); }
 
@@ -102,7 +106,7 @@ test.describe('journey 11: export, clear, import', () => {
 
     const file = await exportFromUi(page);
     expect(file.name).toBe(FILE_NAME);
-    expect(file.name).toMatch(/^tennis-stats-backup-v1-\d{4}-\d{2}-\d{2}\.json$/);
+    expect(file.name).toMatch(/^tennis-stats-backup-v2-\d{4}-\d{2}-\d{2}\.json$/);
     await expect(page.getByText(`Backup saved as ${FILE_NAME} (3 matches, 2 opponents).`, { exact: false })).toBeVisible();
 
     // Human-inspectable, versioned envelope with exactly the tennis records.
@@ -110,7 +114,7 @@ test.describe('journey 11: export, clear, import', () => {
     expect(file.text.split('\n')[1]).toBe('  "format": "tennis-stats-backup",');
     const json = JSON.parse(file.text) as { format: string; version: number; exportedAt: string; data: TennisRecords };
     expect(Object.keys(json)).toEqual(['format', 'version', 'exportedAt', 'data']);
-    expect(json).toMatchObject({ format: 'tennis-stats-backup', version: 1, exportedAt: FIXED_NOW });
+    expect(json).toMatchObject({ format: 'tennis-stats-backup', version: 2, exportedAt: FIXED_NOW });
     expect(Object.keys(json.data)).toEqual(['opponents', 'matches', 'sets', 'games', 'tieBreaks']);
     expect(records(json.data), 'the file holds every tennis record exactly as stored').toEqual(records(original));
     // Canonical order (matches by playedAt; games by set then ordinal), so the bytes do not depend on storage order.
@@ -143,7 +147,7 @@ test.describe('journey 11: export, clear, import', () => {
 
     // Import with replace.
     await chooseFile(page, file.name, file.text);
-    await expect(preview(page)).toContainText('Backup format version 1');
+    await expect(preview(page)).toContainText('Backup format version 2');
     await expect(preview(page)).toContainText('Nothing has been imported yet.');
     expect(await tableRow(page, 'Records in this file', 'Games')).toEqual(['22', '22', '0']);
     expect((await readDatabase(page)).matches, 'the preview changes nothing').toEqual([]);
@@ -210,8 +214,8 @@ test.describe('journey 11: export, clear, import', () => {
 
   const invalid: Array<{ name: string; content: () => string | Buffer; message: string }> = [
     { name: 'garbage', content: () => 'SENTINEL-GARBAGE{ this is not json', message: "This file can't be imported: The file is not valid JSON, so it is not a Tennis Stats backup. Your current data was not changed." },
-    { name: 'wrong version', content: () => JSON.stringify({ format: 'tennis-stats-backup', version: 2, exportedAt: FIXED_NOW, data: { opponents: [], matches: [], sets: [], games: [], tieBreaks: [] } }), message: "This file can't be imported: Unsupported backup version 2. This app can read backup versions 0 and 1. Your current data was not changed." },
-    { name: 'unknown legacy version', content: () => JSON.stringify({ dataVersion: 7, opponents: [], matches: [], sets: [], games: [], tieBreaks: [] }), message: "This file can't be imported: Unsupported backup version (legacy data version 7). This app can read backup versions 0 and 1. Your current data was not changed." },
+    { name: 'wrong version', content: () => JSON.stringify({ format: 'tennis-stats-backup', version: 3, exportedAt: FIXED_NOW, data: { opponents: [], matches: [], sets: [], games: [], tieBreaks: [] } }), message: "This file can't be imported: Unsupported backup version 3. This app can read backup versions 0, 1 and 2. Your current data was not changed." },
+    { name: 'unknown legacy version', content: () => JSON.stringify({ dataVersion: 7, opponents: [], matches: [], sets: [], games: [], tieBreaks: [] }), message: "This file can't be imported: Unsupported backup version (legacy data version 7). This app can read backup versions 0, 1 and 2. Your current data was not changed." },
     { name: 'not a backup', content: () => JSON.stringify({ hello: 'SENTINEL-GARBAGE' }), message: "This file can't be imported: The file is not a Tennis Stats backup. Your current data was not changed." },
     { name: 'oversized', content: () => Buffer.alloc(20 * 1024 * 1024 + 1, 0x20), message: "This file can't be imported: That file is larger than 20 MB, so it is not a Tennis Stats backup. Your current data was not changed." },
     { name: 'empty', content: () => '', message: "This file can't be imported: That file is empty. Your current data was not changed." },
@@ -240,11 +244,33 @@ test.describe('journey 11: export, clear, import', () => {
     expect(text).toContain('4 records added, 0 skipped, 0 not imported');
 
     const stored = await readDatabase(page);
-    for (const entity of ENTITIES) for (const row of legacy[entity]) expect(stored[entity], `${entity} from the v0 file`).toContainEqual(row);
+    for (const entity of ENTITIES) for (const row of legacy[entity]) expect(stored[entity], `${entity} from the v0 file`).toContainEqual(entity === 'games' ? { ...row, unforcedErrors: null, comments: null } : row);
     expect(stored.voiceDrafts, 'legacy drafts are never imported').toEqual([]);
     expect(stored.dataVersion).toBe(CURRENT_DATA_VERSION);
     expect(stored.matches.map(m => m.id).sort()).toEqual(['legacy-match-1', 'm2']);
   });
+
+  for (const version of [1, 2] as const) {
+    test(`a version-${version} backup file is imported through the UI; ${version === 1 ? 'games gain null totals and comments' : 'totals and comments are kept exactly'}`, async ({ page }) => {
+      const text = readFileSync(`src/test/fixtures/backup-v${version}.json`, 'utf8');
+      const file = JSON.parse(text) as { data: TennisRecords };
+      await seedDatabase(page, buildSnapshot(), { then: SETTINGS });
+      await chooseFile(page, `backup-v${version}.json`, text);
+      await expect(preview(page)).toContainText(`Backup format version ${version}`);
+      await importFromUi(page, `backup-v${version}.json`, text, 'merge');
+
+      const stored = await readDatabase(page);
+      expect(stored.dataVersion).toBe(CURRENT_DATA_VERSION);
+      for (const entity of ENTITIES) {
+        for (const row of file.data[entity]) {
+          const expected = entity === 'games' && version === 1 ? { ...row, unforcedErrors: null, comments: null } : row;
+          expect(stored[entity], `${entity} from the v${version} file`).toContainEqual(expected);
+        }
+      }
+      const game1 = stored.games.find(g => g.id === 'game-1')!;
+      expect(game1).toMatchObject(version === 1 ? { unforcedErrors: null, comments: null } : { unforcedErrors: 5, comments: 'Windy; long rally' });
+    });
+  }
 });
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -303,11 +329,13 @@ const tennisStores = { opponents: [oldOpponent], matches: [oldDone, oldActive], 
  * A current-shape draft persisted straight from the recorder: the review page would normally auto-process it. Its
  * recording is null: with a seeded Blob the WebKit run failed in page.evaluate (seeding/reading it back).
  */
-const richRecordedDraft = { id: 'rich-recorded', matchId: 'm', setId: 's1', confirmationId: 'c-rich', dataVersion: 1, recording: null, mimeType: null, transcripts: [], parsedDraft: null, state: 'recorded', error: null, createdAt: '2026-03-14T09:10:00.000Z', updatedAt: '2026-03-14T09:10:00.000Z' };
+const richRecordedDraft = { id: 'rich-recorded', matchId: 'm', setId: 's1', confirmationId: 'c-rich', dataVersion: 2, recording: null, mimeType: null, transcripts: [], parsedDraft: null, state: 'recorded', error: null, createdAt: '2026-03-14T09:10:00.000Z', updatedAt: '2026-03-14T09:10:00.000Z' };
 const legacyDraft = { id: 'with-transcript', matchId: 'm', transcript: 'Won game, one net error', dataVersion: 1, createdAt: 't1', updatedAt: 't2' };
 
+/** Migrated games keep every old field and gain `unforcedErrors: null` and `comments: null`. */
+const migratedStores = { ...tennisStores, games: tennisStores.games.map(game => ({ ...game, unforcedErrors: null, comments: null })) };
 function expectTennisUnchanged(stored: StoredSnapshot) {
-  expect(records(stored)).toEqual(records(tennisStores as unknown as TennisRecords));
+  expect(records(stored)).toEqual(records(migratedStores as unknown as TennisRecords));
 }
 
 test.describe('journey 12: upgrading a previous database version', () => {
@@ -330,6 +358,16 @@ test.describe('journey 12: upgrading a previous database version', () => {
     await expect.poll(async () => (await readDatabase(page)).games.length).toBe(4);
   });
 
+  test('a data-version-2 database gains null totals and comments without overwriting or backfilling', async ({ page }) => {
+    const games = [{ ...oldGames[0], unforcedErrors: 6, comments: 'Kept as written' }, ...oldGames.slice(1)];
+    await createLegacyDatabase(page, { dataVersion: 2, stores: { ...tennisStores, games } });
+    await page.goto('#/matches');
+    await expect.poll(async () => (await readDatabase(page)).dataVersion).toBe(CURRENT_DATA_VERSION);
+    const stored = await readDatabase(page);
+    expect(stored.games.find(g => g.id === 'done-g1')).toMatchObject({ netErrors: 0, longErrors: 0, unforcedErrors: 6, comments: 'Kept as written' });
+    for (const id of ['done-g2', 'g1']) expect(stored.games.find(g => g.id === id), id).toMatchObject({ unforcedErrors: null, comments: null });
+  });
+
   test.describe('with stored audio', () => {
     test.use({ persistentStorage: true }); // the legacy draft carries a Blob (WebKit ephemeral contexts reject Blobs)
     test('a data-version-1 database with legacy voice drafts is upgraded: drafts become retryable, nothing is lost', async ({ page }) => {
@@ -343,7 +381,7 @@ test.describe('journey 12: upgrading a previous database version', () => {
       expectTennisUnchanged(stored);
       const drafts = Object.fromEntries(stored.voiceDrafts.map(d => [d.id, d]));
       expect(stored.voiceDrafts).toHaveLength(2);
-      expect(drafts['with-transcript']).toMatchObject({ ...legacyDraft, setId: 's1', confirmationId: 'legacy-with-transcript', state: 'waiting-retry', recording: null, transcripts: [{ text: 'Won game, one net error', provider: 'legacy', model: 'unknown', timestamp: 't2' }], error: { code: 'legacy', phase: 'parser' } });
+      expect(drafts['with-transcript']).toMatchObject({ ...legacyDraft, dataVersion: 2, setId: 's1', confirmationId: 'legacy-with-transcript', state: 'waiting-retry', recording: null, transcripts: [{ text: 'Won game, one net error', provider: 'legacy', model: 'unknown', timestamp: 't2' }], error: { code: 'legacy', phase: 'parser' } });
       expect(drafts['with-audio']).toMatchObject({ setId: 's1', state: 'recorded', mimeType: 'audio/mp4', recording: { size: 9, type: 'audio/mp4' }, error: null, transcripts: [] });
 
       // Both migrated drafts are offered for resuming; the transcript draft explains what to do.
@@ -420,7 +458,7 @@ test.describe('journey 12: upgrading a previous database version', () => {
       await expect(page).toHaveURL(/#\/settings$/);
       await expect(page.getByText(/^On this device: 2 matches, 1 opponent, 2 sets, 3 games, 1 tie-break/)).toBeVisible();
       const file = await exportFromUi(page);
-      expect(records((JSON.parse(file.text) as { data: TennisRecords }).data)).toEqual(records(tennisStores as unknown as TennisRecords));
+      expect(records((JSON.parse(file.text) as { data: TennisRecords }).data)).toEqual(withNormalizedGames(records(tennisStores as unknown as TennisRecords)));
       // Importing and clearing are disabled with an explanation; AI settings (local storage) stay usable.
       await expect(page.getByLabel('Backup file to import')).toBeDisabled();
       await expect(page.getByLabel('Type DELETE to confirm')).toBeDisabled();

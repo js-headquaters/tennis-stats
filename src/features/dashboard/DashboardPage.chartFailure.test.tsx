@@ -13,7 +13,7 @@ const active: MatchBundle = {
   match: { id: 'm1', createdAt: '', updatedAt: '', opponentId: 'o1', playedAt: new Date(2026, 10, 10, 10).toISOString(), format: 'oneSet', firstServer: 'player', status: 'active', comments: null },
   opponent: { id: 'o1', createdAt: '', updatedAt: '', name: 'Alex', normalizedName: 'alex' },
   sets: [], tieBreaks: [],
-  games: [{ id: 'g1', createdAt: '', updatedAt: '', setId: 's', ordinal: 1, server: 'player', result: 'won', score: null, netErrors: 2, wideErrors: 0, longErrors: 1, doubleFaults: 0, failedReturns: null }],
+  games: [{ id: 'g1', createdAt: '', updatedAt: '', setId: 's', ordinal: 1, server: 'player', result: 'won', score: null, netErrors: 2, wideErrors: 0, longErrors: 1, doubleFaults: 0, failedReturns: null, unforcedErrors: null, comments: null }],
 };
 
 it('keeps Home usable with text equivalents when the chart chunk fails to load', async () => {

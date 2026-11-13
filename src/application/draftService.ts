@@ -1,4 +1,3 @@
-import { z } from 'zod';
 import type { AttemptTrace, Clock, IdGenerator, ParserMatchContext, StatisticsParser, TennisRepository, TranscriptionProvider } from './ports';
 import type { DiagnosticText, DraftGame, MatchBundle, MatchDiagnostic, VoiceDraft } from '../domain/model';
 import { boundText, DIAGNOSTIC_BODY_LIMIT } from '../domain/diagnostics';
@@ -6,6 +5,7 @@ import { validateGame } from '../domain/validation';
 import { nextGameServer, prepareGames } from './matchService';
 import { evaluateSet } from '../domain/scoring';
 import { isReadOnlyRecoveryError } from './recovery';
+import { draftGameSchema as gameSchema, parsedDraftSchema as draftSchema } from './draftSchema';
 
 type Phase = 'transcription' | 'parser';
 type Deps = { repository: TennisRepository; transcriber: TranscriptionProvider; parser: StatisticsParser; clock: Clock; ids: IdGenerator; isOnline: () => boolean; requestTimeoutMs?: number; scheduler?: Scheduler };
@@ -15,9 +15,8 @@ const defaultScheduler: Scheduler = { schedule(action, delay) { const id = setTi
 /** Upper bound for a single transcription or parsing request. */
 export const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
 type AudioInput = { audio: Blob; mimeType: string };
-const metric = z.number().int().nonnegative().nullable();
-const gameSchema = z.object({ server: z.enum(['player', 'opponent']), result: z.enum(['won', 'lost']), netErrors: metric, wideErrors: metric, longErrors: metric, doubleFaults: metric, failedReturns: metric }).strict().refine(g => g.server === 'player' ? g.failedReturns === null : g.doubleFaults === null);
-const draftSchema = z.object({ version: z.literal(1), games: z.array(gameSchema), warnings: z.array(z.string()) }).strict();
+/** The draft game fields a manual review edit may change. */
+const EDITABLE_FIELDS: ReadonlyArray<keyof DraftGame> = ['server', 'result', 'unforcedErrors', 'netErrors', 'wideErrors', 'longErrors', 'doubleFaults', 'failedReturns', 'comments'];
 const messages = { auth: 'Provider authentication failed.', rate: 'Provider rate limit reached.', network: 'Provider network request failed.', config: 'Provider configuration is invalid.', 'invalid-response': 'Provider returned an invalid response.', cancelled: 'Processing cancelled.', timeout: 'Provider request timed out.', offline: 'Waiting for an internet connection.' } as const;
 
 export class DraftStorageError extends Error {
@@ -163,7 +162,7 @@ export function createDraftService({ repository, transcriber, parser, clock, ids
   }
   function persistDraftFromAudio(input: AudioInput & { matchId: string; setId: string }) {
     const now = clock.now();
-    const draft: VoiceDraft = { id: ids.next(), confirmationId: ids.next(), matchId: input.matchId, setId: input.setId, dataVersion: 1, recording: input.audio, mimeType: input.mimeType, transcripts: [], parsedDraft: null, state: 'recorded', error: null, createdAt: now, updatedAt: now };
+    const draft: VoiceDraft = { id: ids.next(), confirmationId: ids.next(), matchId: input.matchId, setId: input.setId, dataVersion: 2, recording: input.audio, mimeType: input.mimeType, transcripts: [], parsedDraft: null, state: 'recorded', error: null, createdAt: now, updatedAt: now };
     return guard(draft.id, async () => { await applicable(draft); return save(draft); });
   }
   async function createDraftFromAudio(input: AudioInput & { matchId: string; setId: string }, signal: AbortSignal) {
@@ -179,10 +178,12 @@ export function createDraftService({ repository, transcriber, parser, clock, ids
   function updateDraftGame(id: string, index: number, patch: Partial<DraftGame>) {
     return guard(id, async () => {
       const draft = await load(id);
-      if (draft.state !== 'ready' || !draft.parsedDraft || !Number.isInteger(index) || index < 0 || index >= draft.parsedDraft.games.length || !patch || Object.keys(patch).some(key => !['server', 'result', 'netErrors', 'wideErrors', 'longErrors', 'doubleFaults', 'failedReturns'].includes(key))) throw new Error('Invalid draft game edit');
-      const game = { ...draft.parsedDraft.games[index], ...patch };
-      const valid = gameSchema.safeParse(game);
-      if (!valid.success || !validateGame({ ...game, id: draft.id, setId: draft.setId, ordinal: index + 1, score: null, createdAt: draft.createdAt, updatedAt: draft.updatedAt }).ok) throw new Error('Invalid draft game edit');
+      if (draft.state !== 'ready' || !draft.parsedDraft || !Number.isInteger(index) || index < 0 || index >= draft.parsedDraft.games.length || !patch || typeof patch !== 'object' || Object.keys(patch).some(key => !EDITABLE_FIELDS.includes(key as keyof DraftGame))) throw new Error('Invalid draft game edit');
+      // The strict schema trims the comment (blank becomes null) and rejects bad totals or an over-long comment before any write.
+      const valid = gameSchema.safeParse({ ...draft.parsedDraft.games[index], ...patch });
+      if (!valid.success) throw new Error('Invalid draft game edit');
+      const game: DraftGame = valid.data;
+      if (!validateGame({ ...game, id: draft.id, setId: draft.setId, ordinal: index + 1, score: null, createdAt: draft.createdAt, updatedAt: draft.updatedAt }).ok) throw new Error('Invalid draft game edit');
       const games = [...draft.parsedDraft.games]; games[index] = game;
       const next = { ...draft, parsedDraft: { ...draft.parsedDraft, games }, updatedAt: clock.now() };
       await storage(() => repository.saveDraft(next)); return next;
@@ -208,8 +209,9 @@ export function createDraftService({ repository, transcriber, parser, clock, ids
       await save({ ...draft, state: 'confirming', error: null });
       const found = await applicable(draft);
       if (found.sets.find(s => s.status === 'active')?.id !== draft.setId) throw new DraftNotApplicableError();
-      if (!draftSchema.safeParse(draft.parsedDraft).success) throw new Error('Invalid draft games');
-      const prepared = prepareGames(found, draft.parsedDraft.games, { clock, ids });
+      const parsed = draftSchema.safeParse(draft.parsedDraft);
+      if (!parsed.success) throw new Error('Invalid draft games');
+      const prepared = prepareGames(found, parsed.data.games, { clock, ids });
       const result = await storage(() => repository.confirmDraft(id, draft.confirmationId, prepared, clock.now(), found));
       const durable = await confirmed(id, draft);
       if (!durable) throw new DraftStorageError();

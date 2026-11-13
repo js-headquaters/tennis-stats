@@ -1,31 +1,33 @@
 import { z } from 'zod';
 import type { Clock, TennisRepository } from './ports';
 import type { DatabaseSnapshot, Game, Match, Opponent, TennisRecords, TennisSet, TieBreak, VoiceDraft } from '../domain/model';
-import { normalizeOpponentName, validateGame } from '../domain/validation';
+import { GAME_COMMENT_MAX_LENGTH, normalizeOpponentName, validateGame } from '../domain/validation';
 
 /*
  * Backup FILE format versions are independent of the IndexedDB DATA_VERSION:
  *  - file v0: legacy raw table dump `{ dataVersion: 0, opponents, matches, sets, games, tieBreaks, drafts? }` (entity shapes of DB data version 0).
- *  - file v1: `{ format, version: 1, exportedAt, data: { opponents, matches, sets, games, tieBreaks } }`.
- * Tennis entity shapes are identical in DB data versions 0, 1 and 2 (only drafts changed), and backups never contain drafts,
- * so file v1 maps onto the current DATA_VERSION; imports are written at the repository's own stored data version.
+ *  - file v1: `{ format, version: 1, exportedAt, data: { opponents, matches, sets, games, tieBreaks } }`; games have no `unforcedErrors`/`comments`.
+ *  - file v2: same envelope with `version: 2`; every game also carries `unforcedErrors` and `comments` (both nullable, both required).
+ * Tennis entity shapes are identical in DB data versions 0, 1 and 2 (only drafts changed) and games gained two fields in data version 3.
+ * Backups never contain drafts, so files v0 and v1 are normalized in memory to the current shape (new game fields become null);
+ * imports are written at the repository's own stored data version.
  */
 export const BACKUP_FORMAT = 'tennis-stats-backup';
-export const BACKUP_VERSION = 1;
+export const BACKUP_VERSION = 2;
 export const MAX_BACKUP_CHARS = 20 * 1024 * 1024;
 const MAX_RECORDS = 100_000;
 const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 export type EntityType = keyof TennisRecords;
 export const ENTITY_TYPES: readonly EntityType[] = ['opponents', 'matches', 'sets', 'games', 'tieBreaks'];
-export interface BackupV1 { format: typeof BACKUP_FORMAT; version: 1; exportedAt: string; data: TennisRecords }
+export interface BackupV2 { format: typeof BACKUP_FORMAT; version: 2; exportedAt: string; data: TennisRecords }
 export interface RejectedRecord { entity: EntityType; /** Position in the file's array for this entity type. */ index: number; id: string | null; reasons: string[] }
 /** Matches of opponent `from` are linked to opponent `to` because both have the same normalized name; `name` is the name of `to`. */
 export interface OpponentRemap { from: string; to: string; name: string }
 export type PreviewCounts = Record<EntityType, { total: number; accepted: number; rejected: number }>;
 export interface ImportPreviewOk {
   ok: true;
-  sourceVersion: 0 | 1;
+  sourceVersion: 0 | 1 | 2;
   exportedAt: string | null;
   /** Accepted records only, in canonical order, already migrated to the current file version. */
   records: TennisRecords;
@@ -60,7 +62,7 @@ const canonical = {
   opponents: (o: Opponent): Opponent => ({ id: o.id, name: o.name, normalizedName: o.normalizedName, createdAt: o.createdAt, updatedAt: o.updatedAt }),
   matches: (m: Match): Match => ({ id: m.id, opponentId: m.opponentId, playedAt: m.playedAt, format: m.format, firstServer: m.firstServer, status: m.status, comments: m.comments, createdAt: m.createdAt, updatedAt: m.updatedAt }),
   sets: (s: TennisSet): TennisSet => ({ id: s.id, matchId: s.matchId, ordinal: s.ordinal, kind: s.kind, status: s.status, tieBreakId: s.tieBreakId, createdAt: s.createdAt, updatedAt: s.updatedAt }),
-  games: (g: Game): Game => ({ id: g.id, setId: g.setId, ordinal: g.ordinal, server: g.server, result: g.result, score: g.score === null ? null : { player: g.score.player, opponent: g.score.opponent }, netErrors: g.netErrors, wideErrors: g.wideErrors, longErrors: g.longErrors, doubleFaults: g.doubleFaults, failedReturns: g.failedReturns, createdAt: g.createdAt, updatedAt: g.updatedAt }),
+  games: (g: Game): Game => ({ id: g.id, setId: g.setId, ordinal: g.ordinal, server: g.server, result: g.result, score: g.score === null ? null : { player: g.score.player, opponent: g.score.opponent }, netErrors: g.netErrors, wideErrors: g.wideErrors, longErrors: g.longErrors, doubleFaults: g.doubleFaults, failedReturns: g.failedReturns, unforcedErrors: g.unforcedErrors ?? null, comments: g.comments ?? null, createdAt: g.createdAt, updatedAt: g.updatedAt }),
   tieBreaks: (t: TieBreak): TieBreak => ({ id: t.id, setId: t.setId, kind: t.kind, playerPoints: t.playerPoints, opponentPoints: t.opponentPoints, netErrors: t.netErrors, wideErrors: t.wideErrors, longErrors: t.longErrors, doubleFaults: t.doubleFaults, createdAt: t.createdAt, updatedAt: t.updatedAt }),
 };
 const cmp = (a: string | number, b: string | number) => (a < b ? -1 : a > b ? 1 : 0);
@@ -84,15 +86,15 @@ const opponentKey = (o: Opponent) => normalizeOpponentName(o.normalizedName).toL
 
 // ---------- export ----------
 
-export async function exportBackup(repo: TennisRepository, clock: Clock): Promise<BackupV1> {
+export async function exportBackup(repo: TennisRepository, clock: Clock): Promise<BackupV2> {
   const snapshot = await repo.snapshot();
   return { format: BACKUP_FORMAT, version: BACKUP_VERSION, exportedAt: clock.now(), data: canonicalRecords(snapshot) };
 }
 /** Human-inspectable, byte-deterministic JSON for a backup. */
-export function serializeBackup(backup: BackupV1): string {
+export function serializeBackup(backup: BackupV2): string {
   return `${JSON.stringify({ format: backup.format, version: backup.version, exportedAt: backup.exportedAt, data: canonicalRecords(backup.data) }, null, 2)}\n`;
 }
-/** `tennis-stats-backup-v1-YYYY-MM-DD.json`, using the UTC date of the given ISO instant (from the injected clock). */
+/** `tennis-stats-backup-v2-YYYY-MM-DD.json`, using the UTC date of the given ISO instant (from the injected clock). */
 export function backupFileName(nowIso: string): string {
   const date = new Date(nowIso);
   if (Number.isNaN(date.getTime())) throw new Error('Invalid backup date');
@@ -106,16 +108,24 @@ const id = nonBlank;
 const stamp = z.string().min(1).max(100);
 const metric = z.number().int().min(0).max(10_000).nullable();
 const point = z.enum(['0', '15', '30', '40', 'AD']);
+const gameBase = { id, setId: id, ordinal: z.number().int().min(0).max(1_000), server: z.enum(['player', 'opponent']), result: z.enum(['won', 'lost']), score: z.strictObject({ player: point, opponent: point }).nullable(), netErrors: metric, wideErrors: metric, longErrors: metric, doubleFaults: metric, failedReturns: metric };
+const gameTimes = { createdAt: stamp, updatedAt: stamp };
+const gameTotals = { unforcedErrors: metric, comments: z.string().max(GAME_COMMENT_MAX_LENGTH).nullable() };
+/** File v0/v1 games: the old strict keys; the new fields are normalized to null. */
+const gameV1 = z.strictObject({ ...gameBase, ...gameTimes }).transform((game): Game => ({ ...game, unforcedErrors: null, comments: null }));
+/** File v2 games: both new keys are required. */
+const gameV2 = z.strictObject({ ...gameBase, ...gameTotals, ...gameTimes });
 const schemas = {
   opponents: z.strictObject({ id, name: nonBlank, normalizedName: nonBlank, createdAt: stamp, updatedAt: stamp }),
   matches: z.strictObject({ id, opponentId: id, playedAt: stamp, format: z.enum(['twoSetsSuperTiebreak', 'openPractice', 'oneSet', 'bestOfThree']), firstServer: z.enum(['player', 'opponent']), status: z.enum(['active', 'completed', 'abandoned']), comments: z.string().max(10_000).nullable(), createdAt: stamp, updatedAt: stamp }),
   sets: z.strictObject({ id, matchId: id, ordinal: z.number().int().min(1).max(100), kind: z.enum(['standard', 'decidingSuperTiebreak']), status: z.enum(['active', 'completed', 'unfinished']), tieBreakId: id.nullable(), createdAt: stamp, updatedAt: stamp }),
-  games: z.strictObject({ id, setId: id, ordinal: z.number().int().min(0).max(1_000), server: z.enum(['player', 'opponent']), result: z.enum(['won', 'lost']), score: z.strictObject({ player: point, opponent: point }).nullable(), netErrors: metric, wideErrors: metric, longErrors: metric, doubleFaults: metric, failedReturns: metric, createdAt: stamp, updatedAt: stamp }),
   tieBreaks: z.strictObject({ id, setId: id, kind: z.enum(['standard', 'super']), playerPoints: z.number().int().min(0).max(1_000), opponentPoints: z.number().int().min(0).max(1_000), netErrors: metric, wideErrors: metric, longErrors: metric, doubleFaults: metric, createdAt: stamp, updatedAt: stamp }),
 };
+const entitySchemas = (version: 0 | 1 | 2) => ({ ...schemas, games: version === 2 ? gameV2 : gameV1 });
 const recordArray = z.array(z.unknown()).max(MAX_RECORDS);
 const rawData = z.strictObject({ opponents: recordArray, matches: recordArray, sets: recordArray, games: recordArray, tieBreaks: recordArray });
 const v1Envelope = z.strictObject({ format: z.literal(BACKUP_FORMAT), version: z.literal(1), exportedAt: stamp, data: rawData });
+const v2Envelope = z.strictObject({ format: z.literal(BACKUP_FORMAT), version: z.literal(2), exportedAt: stamp, data: rawData });
 const v0Envelope = z.strictObject({ dataVersion: z.literal(0), opponents: recordArray, matches: recordArray, sets: recordArray, games: recordArray, tieBreaks: recordArray, drafts: recordArray.optional(), voiceDrafts: recordArray.optional(), metadata: recordArray.optional() });
 type RawData = z.infer<typeof rawData>;
 
@@ -127,7 +137,7 @@ function describeIssues(error: z.ZodError): string[] {
 // ---------- preview ----------
 
 const fail = (error: string): ImportPreviewError => ({ ok: false, error });
-const supported = 'This app can read backup versions 0 and 1.';
+const supported = 'This app can read backup versions 0, 1 and 2.';
 
 function findForbiddenKey(root: unknown): string | null {
   const stack: unknown[] = [root];
@@ -154,10 +164,10 @@ export function previewImport(raw: string): ImportPreview {
   const file = parsed as Record<string, unknown>;
   if ('format' in file) {
     if (file.format !== BACKUP_FORMAT) return fail('The file is not a Tennis Stats backup.');
-    if (file.version !== 1) return fail(`Unsupported backup version ${typeof file.version === 'number' && Number.isFinite(file.version) ? file.version : '(unrecognized)'}. ${supported}`);
-    const envelope = v1Envelope.safeParse(file);
+    if (file.version !== 1 && file.version !== 2) return fail(`Unsupported backup version ${typeof file.version === 'number' && Number.isFinite(file.version) ? file.version : '(unrecognized)'}. ${supported}`);
+    const envelope = (file.version === 2 ? v2Envelope : v1Envelope).safeParse(file);
     if (!envelope.success) return fail(`The backup file structure is invalid: ${describeIssues(envelope.error).join('; ')}`);
-    return validateRecords(envelope.data.data, 1, envelope.data.exportedAt, []);
+    return validateRecords(envelope.data.data, file.version, envelope.data.exportedAt, []);
   }
   if ('dataVersion' in file) {
     if (file.dataVersion !== 0) return fail(`Unsupported backup version (legacy data version ${typeof file.dataVersion === 'number' && Number.isFinite(file.dataVersion) ? file.dataVersion : 'unrecognized'}). ${supported}`);
@@ -168,7 +178,7 @@ export function previewImport(raw: string): ImportPreview {
   return fail('The file is not a Tennis Stats backup.');
 }
 
-/** File v0 -> v1, in memory: wrap the table dump in the v1 envelope; drafts are never imported (reported as a warning). */
+/** File v0 -> v1 shape, in memory (validated and normalized to the current shape later): wrap the table dump in the v1 envelope; drafts are never imported (reported as a warning). */
 function migrateV0(file: z.infer<typeof v0Envelope>): [RawData, 0, null, string[]] {
   const drafts = (file.drafts?.length ?? 0) + (file.voiceDrafts?.length ?? 0);
   const warnings = drafts ? [`${drafts} voice draft${drafts === 1 ? '' : 's'} in this legacy file ${drafts === 1 ? 'is' : 'are'} not imported: backups never restore drafts or recordings.`] : [];
@@ -180,13 +190,13 @@ function migrateV0(file: z.infer<typeof v0Envelope>): [RawData, 0, null, string[
 interface Candidate<T> { index: number; id: string | null; parent: string | null; value: T | null; reasons: string[] }
 type Candidates = { [K in EntityType]: Candidate<TennisRecords[K][number]>[] };
 
-function validateRecords(data: RawData, sourceVersion: 0 | 1, exportedAt: string | null, warnings: string[]): ImportPreviewOk {
+function validateRecords(data: RawData, sourceVersion: 0 | 1 | 2, exportedAt: string | null, warnings: string[]): ImportPreviewOk {
   const all = {} as Candidates;
   for (const entity of ENTITY_TYPES) {
     (all as Record<EntityType, Candidate<unknown>[]>)[entity] = data[entity].map((item, index) => {
       const field = (name: string) => { const v = item && typeof item === 'object' ? (item as Record<string, unknown>)[name] : undefined; return typeof v === 'string' ? v.slice(0, 200) : null; };
       const parent = entity === 'sets' ? field('matchId') : entity === 'games' || entity === 'tieBreaks' ? field('setId') : null;
-      const result = schemas[entity].safeParse(item);
+      const result = entitySchemas(sourceVersion)[entity].safeParse(item);
       if (!result.success) return { index, id: field('id'), parent, value: null, reasons: describeIssues(result.error) };
       const value = result.data as TennisRecords[EntityType][number];
       const reasons = entity === 'games'

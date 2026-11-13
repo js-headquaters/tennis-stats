@@ -1,15 +1,28 @@
 import { describe, expect, it } from 'vitest';
 import type { Game, MatchFormat, MatchStatus, TennisSet, TieBreak } from './model';
-import { normalizeOpponentName, validateGame } from './validation';
+import { GAME_COMMENT_MAX_LENGTH, normalizeGameComment, normalizeOpponentName, validateGame } from './validation';
 
 const game = (overrides: Partial<Game> = {}): Game => ({
   id: 'game-1', setId: 'set-1', ordinal: 1, server: 'player', result: 'won',
   score: null, netErrors: 0, wideErrors: null, longErrors: null,
-  doubleFaults: null, failedReturns: null, createdAt: '2026-11-11T00:00:00.000Z',
+  doubleFaults: null, failedReturns: null, unforcedErrors: null, comments: null, createdAt: '2026-11-11T00:00:00.000Z',
   updatedAt: '2026-11-11T00:00:00.000Z', ...overrides,
 });
 
 describe('domain validation', () => {
+  it('normalizes game comments', () => {
+    expect(GAME_COMMENT_MAX_LENGTH).toBe(10_000);
+    expect(normalizeGameComment('  hi  ')).toBe('hi');
+    expect(normalizeGameComment('   ')).toBeNull();
+    expect(normalizeGameComment(null)).toBeNull();
+  });
+  it('validates unforcedErrors and comments', () => {
+    expect(validateGame(game({ unforcedErrors: 0, comments: 'ok' }))).toMatchObject({ ok: true });
+    for (const bad of [-1, 1.5]) expect(validateGame(game({ unforcedErrors: bad }))).toMatchObject({ ok: false });
+    expect(validateGame(game({ comments: 'x'.repeat(10_000) }))).toMatchObject({ ok: true });
+    expect(validateGame(game({ comments: 'x'.repeat(10_001) }))).toMatchObject({ ok: false });
+    expect(validateGame(game({ comments: 5 as unknown as string }))).toMatchObject({ ok: false });
+  });
   it('trims opponent names and rejects empty names', () => {
     expect(normalizeOpponentName('  Casey  ')).toBe('Casey');
     expect(normalizeOpponentName('   ')).toBe('');

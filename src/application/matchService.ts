@@ -1,6 +1,6 @@
 import type { Clock, IdGenerator, TennisRepository } from './ports';
 import type { Game, MatchBundle, MatchFormat, Server, TennisSet, TieBreak } from '../domain/model';
-import { normalizeOpponentName, validateGame } from '../domain/validation';
+import { normalizeGameComment, normalizeOpponentName, validateGame } from '../domain/validation';
 import { decidingStoredSet, evaluateMatch, evaluateSet, evaluateStoredMatch, evaluateStoredSet, inferServer } from '../domain/scoring';
 
 export interface MatchServiceDeps { repository: TennisRepository; clock: Clock; ids: IdGenerator }
@@ -45,7 +45,7 @@ export function nextGameServer(bundle: MatchBundle): Server {
   return next;
 }
 
-export type GameInput = Pick<Game, 'result' | 'netErrors' | 'wideErrors' | 'longErrors' | 'doubleFaults' | 'failedReturns'> & { server?: Server; score?: Game['score'] };
+export type GameInput = Pick<Game, 'result' | 'netErrors' | 'wideErrors' | 'longErrors' | 'doubleFaults' | 'failedReturns'> & { server?: Server; score?: Game['score']; unforcedErrors?: Game['unforcedErrors']; comments?: Game['comments'] };
 
 function completeSet(bundle: MatchBundle, set: TennisSet, now: string, ids: IdGenerator) {
   set.status = 'completed'; set.updatedAt = now;
@@ -74,7 +74,7 @@ export function prepareGames(found: MatchBundle, inputs: GameInput[], { clock, i
     const score = evaluateStoredSet(bundle, set);
     if (score.playerGames === 6 && score.opponentGames === 6) throw new Error('Complete the tie-break before adding games');
     const existing = bundle.games.filter(game => game.setId === set.id);
-    const game: Game = { ...input, id: ids.next(), setId: set.id, ordinal: Math.max(0, ...existing.map(item => item.ordinal)) + 1, server: input.server ?? nextGameServer(bundle), score: input.score ?? null, createdAt: now, updatedAt: now };
+    const game: Game = { ...input, unforcedErrors: input.unforcedErrors ?? null, comments: typeof input.comments === 'string' ? normalizeGameComment(input.comments) : input.comments ?? null, id: ids.next(), setId: set.id, ordinal: Math.max(0, ...existing.map(item => item.ordinal)) + 1, server: input.server ?? nextGameServer(bundle), score: input.score ?? null, createdAt: now, updatedAt: now };
     if (game.result !== 'won' && game.result !== 'lost') throw new Error('Choose whether the game was won or lost');
     const valid = validateGame(game);
     if (!valid.ok) throw new Error(valid.issues.map(issue => `${issue.field}: ${issue.message}`).join('; '));
@@ -159,7 +159,7 @@ export async function updateComments(id: string, comments: string | null, { repo
   return bundle;
 }
 
-export type GamePatch = Partial<Pick<Game, 'server' | 'result' | 'score' | 'netErrors' | 'wideErrors' | 'longErrors' | 'doubleFaults' | 'failedReturns'>>;
+export type GamePatch = Partial<Pick<Game, 'server' | 'result' | 'score' | 'netErrors' | 'wideErrors' | 'longErrors' | 'doubleFaults' | 'failedReturns' | 'unforcedErrors' | 'comments'>>;
 export interface GameConflict { type: 'serverChanged' | 'setOutcomeInvalidated' | 'structureInvalidated' | 'matchOutcomeInvalidated'; message: string; gameId?: string; setId?: string; tieBreakId?: string }
 
 async function findGame(id: string, repository: TennisRepository): Promise<MatchBundle> {
@@ -232,9 +232,10 @@ export async function updateGame(gameId: string, patch: GamePatch, { repository,
   const before = await findGame(gameId, repository);
   const bundle = structuredClone(before);
   const game = bundle.games.find(item => item.id === gameId)!;
-  const allowed = ['server', 'result', 'score', 'netErrors', 'wideErrors', 'longErrors', 'doubleFaults', 'failedReturns'];
+  const allowed = ['server', 'result', 'score', 'netErrors', 'wideErrors', 'longErrors', 'doubleFaults', 'failedReturns', 'unforcedErrors', 'comments'];
   if (!patch || Object.keys(patch).some(key => !allowed.includes(key))) throw new Error('Invalid game patch');
   Object.assign(game, patch, { updatedAt: clock.now() });
+  if (typeof game.comments === 'string') game.comments = normalizeGameComment(game.comments);
   if (game.result !== 'won' && game.result !== 'lost') throw new Error('Invalid game result');
   const valid = validateGame(game);
   if (!valid.ok) throw new Error(valid.issues.map(issue => `${issue.field}: ${issue.message}`).join('; '));

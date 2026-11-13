@@ -19,9 +19,11 @@
 .metric { border: 1px solid var(--border); padding: .75rem; display: flex; flex-direction: column; }
 .metric strong { font-size: 1.5rem; }
 .live-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; }
-.draft-game-card button, .draft-game-card input, .draft-game-card select { min-height: 44px; min-width: 44px; padding: .5rem; font: inherit; }
+.draft-game-card button, .draft-game-card input, .draft-game-card select, .draft-game-card textarea { min-height: 44px; min-width: 44px; padding: .5rem; font: inherit; }
 .draft-game-card > label { display: block; margin: .75rem 0; }
-.draft-game-card label input, .draft-game-card label select { display: block; width: 100%; }
+.draft-game-card label input, .draft-game-card label select, .draft-game-card label textarea { display: block; width: 100%; }
+.draft-game-card summary { min-height: 44px; min-width: 44px; display: flex; align-items: center; cursor: pointer; font-weight: 700; }
+.draft-game-card summary:focus-visible { outline: 3px solid var(--text); outline-offset: 2px; }
 .draft-game-card .metric { min-width: 0; }
 .record-page { padding-bottom: 6rem; }
 .record-page button, .record-page a { min-height: 44px; min-width: 44px; padding: .5rem; font: inherit; }
@@ -105,3 +107,8 @@
 .live-match-error button, .live-match-error a { min-height: 44px; min-width: 44px; padding: .5rem .75rem; font: inherit; display: inline-flex; align-items: center; justify-content: center; color: var(--text); }
 .route-fallback { padding: 1.25rem; }
 .route-fallback-links a { min-height: 44px; min-width: 44px; padding: .5rem .75rem; display: inline-flex; align-items: center; color: var(--text); background: white; border: 1px solid var(--border); border-radius: .5rem; font-weight: 700; }
+.live-match summary, .match-details summary { min-height: 44px; min-width: 44px; display: flex; align-items: center; cursor: pointer; font-weight: 700; }
+.live-match summary:focus-visible, .match-details summary:focus-visible { outline: 3px solid var(--text); outline-offset: 2px; }
+.game-details, .game-form-details { margin: .5rem 0; }
+.game-comment { margin: .5rem 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.metric small { font-size: .75rem; }

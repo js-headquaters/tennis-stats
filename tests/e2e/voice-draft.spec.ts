@@ -68,7 +68,7 @@ test('@smoke reviews a mocked batch transcript, corrects it by voice, and commit
   await expect(draftCard(page, 1).getByLabel('Wide errors')).toHaveValue('0');
   await expect(draftCard(page, 1).getByTestId('draft-metric-longErrors').getByLabel('Unknown')).toBeVisible();
   await expect(draftCard(page, 2).getByLabel('Server')).toHaveValue('opponent');
-  await expect(draftCard(page, 2).getByLabel('Failed returns')).toHaveValue('1');
+  await expect(draftCard(page, 2).getByLabel('Receive errors')).toHaveValue('1');
 
   // The providers got the audio, then the transcript with the match context; both carried the configured (fake) key.
   expect(ai.calls.map(call => call.kind)).toEqual(['transcription', 'openai-parser']);
@@ -98,7 +98,7 @@ test('@smoke reviews a mocked batch transcript, corrects it by voice, and commit
   await expect(page.getByText(correction)).toBeVisible();
   await expect(page.getByText(FIRST_TRANSCRIPT), 'the original transcript stays available').toBeVisible();
   await expect(draftCard(page, 3).getByLabel('Result')).toHaveValue('lost');
-  await expect(draftCard(page, 4).getByLabel('Failed returns')).toHaveValue('0');
+  await expect(draftCard(page, 4).getByLabel('Receive errors')).toHaveValue('0');
   expect(ai.calls.map(call => call.kind)).toEqual(['transcription', 'openai-parser', 'transcription', 'openai-parser']);
   const refineBody = JSON.parse(ai.callsOf('openai-parser')[1].body ?? '{}') as unknown;
   expect(JSON.stringify(refineBody), 'the refinement sends the edited draft as context').toContain('existingDraft');
@@ -117,6 +117,54 @@ test('@smoke reviews a mocked batch transcript, corrects it by voice, and commit
   expect(stored.games.every(game => game.setId === SET_ID)).toBe(true);
   expect(stored.voiceDrafts, 'the confirmed draft and its recording are deleted').toEqual([]);
   expect(stored.metadata).toEqual([{ key: expect.stringMatching(/^draft-confirmation:/), value: { draftId, matchId: MATCH_ID, confirmedAt: FIXED_NOW } }]);
+});
+
+test('keeps each game comment with its own game through a manual edit, a refinement, a reload and a single confirmation', async ({ page }) => {
+  const MATCH_COMMENT = 'Windy evening; match comment stays untouched';
+  const parsed = [
+    g('player', 'won', { unforcedErrors: 4, doubleFaults: 1, comments: 'Held after a long deuce' }),
+    g('opponent', 'lost', { unforcedErrors: 2, failedReturns: 1, comments: 'Rushed the return' }),
+  ];
+  const ai = await setUp(page, { scenario: { transcript: 'Game one, four unforced errors, held after a long deuce. Game two lost, rushed the return.', games: parsed } });
+  const bundle = buildMatchBundle({ id: MATCH_ID, opponent: 'Alex Example', format: 'oneSet', firstServer: 'player', comments: MATCH_COMMENT });
+  await seedDatabase(page, buildSnapshot({ bundles: [bundle] }), { then: RECORD });
+  const draftId = await recordClip(page);
+  await expect(status(page, 'Ready for review.')).toBeVisible();
+  await expect(draftCard(page, 1).getByLabel('Game comment')).toHaveValue('Held after a long deuce');
+  await expect(draftCard(page, 2).getByLabel('Game comment')).toHaveValue('Rushed the return');
+  await expect(draftCard(page, 1).getByLabel('Unforced errors')).toHaveValue('4');
+
+  // Manual edit of one comment only.
+  await draftCard(page, 2).getByLabel('Game comment').fill('Rushed the return on the backhand');
+  await draftCard(page, 2).getByRole('button', { name: 'Save game 2' }).click();
+  await expect.poll(async () => (await readDatabase(page)).voiceDrafts[0]?.parsedDraft?.games.map(game => game.comments)).toEqual(['Held after a long deuce', 'Rushed the return on the backhand']);
+
+  // Refine by voice: the existing (edited) draft is sent as context; the revision keeps comments with their games.
+  const refined = [parsed[0], { ...parsed[1], comments: 'Rushed the return on the backhand' }, g('player', 'won', { unforcedErrors: 1, doubleFaults: 0, comments: 'Clean hold' })];
+  ai.update({ transcript: 'Add game three, a clean hold with one unforced error.', games: refined });
+  await page.getByRole('button', { name: 'Start recording' }).click();
+  await page.getByRole('button', { name: 'Stop recording' }).click();
+  await expect(page.locator('form.draft-game-card')).toHaveCount(3);
+  expect(ai.callsOf('openai-parser')[1].body).toContain('Rushed the return on the backhand');
+
+  // Reload the review: the draft (with comments) is restored from storage.
+  await page.reload();
+  await expect(page.locator('form.draft-game-card')).toHaveCount(3);
+  await expect(draftCard(page, 1).getByLabel('Game comment')).toHaveValue('Held after a long deuce');
+  await expect(draftCard(page, 2).getByLabel('Game comment')).toHaveValue('Rushed the return on the backhand');
+  await expect(draftCard(page, 3).getByLabel('Game comment')).toHaveValue('Clean hold');
+
+  await page.getByRole('button', { name: 'Confirm and add' }).click();
+  await expect(page).toHaveURL(new RegExp(`${LIVE}$`));
+  const stored = await readDatabase(page);
+  const games = [...stored.games].sort((a, b) => a.ordinal - b.ordinal);
+  expect(games.map(game => [game.ordinal, game.server, game.unforcedErrors, game.comments])).toEqual([
+    [1, 'player', 4, 'Held after a long deuce'], [2, 'opponent', 2, 'Rushed the return on the backhand'], [3, 'player', 1, 'Clean hold'],
+  ]);
+  expect(stored.matches.find(m => m.id === MATCH_ID)!.comments, 'the general match comment is unchanged').toBe(MATCH_COMMENT);
+  expect(stored.voiceDrafts).toEqual([]);
+  expect(stored.metadata.filter(row => row.key.startsWith('draft-confirmation:')).map(row => row.value), 'confirmed exactly once').toEqual([{ draftId, matchId: MATCH_ID, confirmedAt: FIXED_NOW }]);
+  await expect(page.getByRole('article', { name: 'Game 2', exact: true })).toContainText('Rushed the return on the backhand');
 });
 
 test.describe('duplicate confirmation', () => {
@@ -302,7 +350,7 @@ test.describe('provider secret redaction', () => {
 
 test.describe('iOS/WebKit microphone fallback to manual entry', () => {
   const retained: SeedDraft = {
-    id: 'retained-draft', confirmationId: 'retained-confirmation', matchId: MATCH_ID, setId: SET_ID, dataVersion: 1,
+    id: 'retained-draft', confirmationId: 'retained-confirmation', matchId: MATCH_ID, setId: SET_ID, dataVersion: 2,
     recording: { type: 'audio/mp4', text: 'EARLIER-AUDIO' }, mimeType: 'audio/mp4', transcripts: [], parsedDraft: null, state: 'waiting-retry',
     error: { code: 'offline', message: 'Waiting for an internet connection.', phase: 'transcription' }, createdAt: FIXED_NOW, updatedAt: FIXED_NOW,
   };
@@ -340,6 +388,7 @@ test.describe('iOS/WebKit microphone fallback to manual entry', () => {
       await expect(page).toHaveURL(new RegExp(`${LIVE}$`));
       await page.getByRole('button', { name: 'Manual game entry' }).click();
       const form = page.getByRole('form', { name: 'Manual game entry' });
+      await form.getByText('Add details').click();
       await form.getByLabel('Net errors').fill('1');
       await form.getByRole('button', { name: 'Add game' }).click();
       await expect(page.getByText('Set 1: 1–0 (active)')).toBeVisible();

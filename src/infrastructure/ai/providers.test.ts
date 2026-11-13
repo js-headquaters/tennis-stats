@@ -9,7 +9,7 @@ import { redactProviderError, SafeProviderError } from './common';
 
 const key = 'SENTINEL_FAKE_KEY';
 const config = { provider: 'openai' as const, model: 'test', endpoint: '', apiKey: key };
-const draft = { version: 1, games: [{ server: 'player', result: 'won', netErrors: null, wideErrors: 0, longErrors: null, doubleFaults: 0, failedReturns: null }], warnings: [] };
+const draft = { version: 2, games: [{ server: 'player', result: 'won', netErrors: null, wideErrors: 0, longErrors: null, doubleFaults: 0, failedReturns: null, unforcedErrors: null, comments: null }], warnings: [] };
 it('rejects insecure or credential-bearing endpoints before sending keys', async () => {
   for (const endpoint of ['http://example.com/v1', 'http://192.168.1.1/v1', 'https://user:pass@example.com/v1', `https://example.com/v1?key=${key}`, 'https://example.com/v1#secret']) {
     const fetcher = vi.fn();
@@ -45,7 +45,7 @@ it('uses a valid example and explicit enum instructions in both parser prompts',
 });
 it('validates strict drafts and cross-field rules', () => {
   expect(parsedDraftSchema.parse(draft)).toEqual(draft);
-  for (const game of [{ ...draft.games[0], netErrors: -1 }, { ...draft.games[0], wideErrors: 0.5 }, { ...draft.games[0], failedReturns: 0 }, { ...draft.games[0], server: 'opponent', doubleFaults: 0 }, { ...draft.games[0], result: 'maybe' }]) expect(parsedDraftSchema.safeParse({ ...draft, games: [game] }).success).toBe(false);
+  for (const game of [{ ...draft.games[0], netErrors: -1 }, { ...draft.games[0], wideErrors: 0.5 }, { ...draft.games[0], failedReturns: 0, unforcedErrors: null, comments: null }, { ...draft.games[0], server: 'opponent', doubleFaults: 0 }, { ...draft.games[0], result: 'maybe' }]) expect(parsedDraftSchema.safeParse({ ...draft, games: [game] }).success).toBe(false);
 });
 it('sends multipart audio and cancellation signal', async () => {
   const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ text: 'hello' })));
@@ -167,4 +167,60 @@ it('redacts the API key (raw, JSON-escaped, URL-escaped) from traced bodies', as
   const { calls, trace } = recorder();
   await makeParser('openai', vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: key } }] })))).parse({ transcript: 't' }, new AbortController().signal, trace).catch(() => undefined);
   expect(JSON.stringify(calls)).not.toContain(key);
+});
+
+const keys = ['server', 'result', 'unforcedErrors', 'netErrors', 'wideErrors', 'longErrors', 'doubleFaults', 'failedReturns', 'comments'] as const;
+async function promptFor(provider: 'openai' | 'anthropic') {
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(provider === 'openai' ? { choices: [{ message: { content: JSON.stringify(draft) } }] } : { content: [{ type: 'text', text: JSON.stringify(draft) }] })));
+  const parser = provider === 'openai' ? createOpenAiParser(config, fetcher) : createAnthropicParser({ ...config, provider }, fetcher);
+  await parser.parse({ transcript: '' }, new AbortController().signal);
+  const body = JSON.parse(fetcher.mock.calls[0][1].body); return (provider === 'openai' ? body.messages[0].content : body.system) as string;
+}
+it('instructs both providers on the strict version 2 game shape with totals, receive errors and per-game comments', async () => {
+  for (const provider of ['openai', 'anthropic'] as const) {
+    const prompt = await promptFor(provider);
+    expect(prompt).toContain('"version":2'); expect(prompt).not.toContain('"version":1');
+    const example = JSON.parse(prompt.match(/\{"version":2.*?"warnings":\[\]\}/)![0]);
+    expect(parsedDraftSchema.safeParse(example).success).toBe(true);
+    expect(Object.keys(example.games[0]).sort()).toEqual([...keys].sort());
+    expect(prompt).toMatch(/failedReturns[^.]*Receive errors/);
+    expect(prompt).toMatch(/unforcedErrors[^.]*total/i);
+    expect(prompt).toMatch(/total[^.]*(also|plus|and)[^.]*(net|wide|long)/i);
+    expect(prompt).toMatch(/comments[^.]*(only )?(the|that) game[^.]*(accompan|belong|describ)/i);
+    expect(prompt).toMatch(/ambiguous[^.]*(null|unknown)[^.]*warning/i);
+    expect(prompt).toContain('10000');
+    expect(prompt).toMatch(/match comment/i);
+  }
+});
+it('accepts explicit totals that differ from details and normalizes comments', () => {
+  const game = { ...draft.games[0], unforcedErrors: 1, netErrors: 2, wideErrors: 3, longErrors: null, comments: '  late on the backhand \n' };
+  expect(parsedDraftSchema.parse({ ...draft, games: [game] }).games[0]).toEqual({ ...game, comments: 'late on the backhand' });
+  expect(parsedDraftSchema.parse({ ...draft, games: [{ ...game, comments: '   ' }] }).games[0].comments).toBeNull();
+  expect(parsedDraftSchema.parse({ ...draft, games: [{ ...game, comments: 'x'.repeat(10_000) }] }).games[0].comments).toHaveLength(10_000);
+  expect(parsedDraftSchema.parse({ ...draft, games: [{ ...game, comments: ` ${'x'.repeat(10_000)} ` }] }).games[0].comments).toHaveLength(10_000);
+  expect(parsedDraftSchema.parse({ ...draft, games: [] })).toEqual({ ...draft, games: [] });
+});
+it('rejects extra, missing or malformed game fields and any match-level comment', () => {
+  const base = draft.games[0];
+  const bad: unknown[] = [
+    { ...base, extra: 1 }, { ...base, matchComments: 'x' },
+    ...keys.map(key => { const copy: Record<string, unknown> = { ...base }; delete copy[key]; return copy; }),
+    ...keys.filter(key => key.endsWith('Errors') || key === 'doubleFaults').flatMap(key => [{ ...base, [key]: -1 }, { ...base, [key]: 1.5 }, { ...base, [key]: 2 ** 53 }, { ...base, [key]: '1' }]),
+    { ...base, unforcedErrors: undefined }, { ...base, comments: undefined }, { ...base, comments: 'x'.repeat(10_001) }, { ...base, comments: 5 },
+    { ...base, server: 'player', failedReturns: 0 }, { ...base, server: 'opponent', doubleFaults: 0 },
+    { ...base, server: 'opponent', doubleFaults: null, failedReturns: -1 }, { ...base, server: 'opponent', doubleFaults: null, failedReturns: 0.5 },
+  ];
+  for (const game of bad) expect(parsedDraftSchema.safeParse({ ...draft, games: [game] }).success, JSON.stringify(game).slice(0, 120)).toBe(false);
+  for (const extra of [{ comments: 'match' }, { matchComments: 'match' }, { matchComment: 'match' }]) expect(parsedDraftSchema.safeParse({ ...draft, ...extra }).success).toBe(false);
+  expect(parsedDraftSchema.safeParse({ ...draft, version: 1 }).success).toBe(false);
+});
+it('turns a malformed v2 response into a retryable invalid-response error for both providers', async () => {
+  const invalid = { ...draft, games: [{ ...draft.games[0], comments: 'x'.repeat(10_001) }] };
+  const missing = { ...draft, games: [{ server: 'player', result: 'won', netErrors: null, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null }] };
+  for (const content of [invalid, missing]) {
+    const a = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(content) } }] })));
+    const b = vi.fn().mockResolvedValue(new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(content) }] })));
+    await expect(createOpenAiParser(config, a).parse({ transcript: 't' }, new AbortController().signal)).rejects.toMatchObject({ code: 'invalid-response' });
+    await expect(createAnthropicParser({ ...config, provider: 'anthropic' }, b).parse({ transcript: 't' }, new AbortController().signal)).rejects.toMatchObject({ code: 'invalid-response' });
+  }
 });

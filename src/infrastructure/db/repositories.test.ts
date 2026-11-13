@@ -13,10 +13,10 @@ const bundle = (id: string, status: 'active' | 'completed' = 'active'): MatchBun
   opponent: { ...stamp, id: 'o', name: 'Alex', normalizedName: 'alex' },
   match: { ...stamp, id, opponentId: 'o', playedAt: stamp.createdAt, format: 'oneSet', firstServer: 'player', status, comments: null },
   sets: [{ ...stamp, id: `${id}-s2`, matchId: id, ordinal: 2, kind: 'standard', status: 'active', tieBreakId: null }, { ...stamp, id: `${id}-s1`, matchId: id, ordinal: 1, kind: 'standard', status: 'completed', tieBreakId: `${id}-t` }],
-  games: [2, 1].map(ordinal => ({ ...stamp, id: `${id}-g${ordinal}`, setId: `${id}-s1`, ordinal, server: 'player', result: 'won', score: null, netErrors: 0, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null })),
+  games: [2, 1].map(ordinal => ({ ...stamp, id: `${id}-g${ordinal}`, setId: `${id}-s1`, ordinal, server: 'player', result: 'won', score: null, netErrors: 0, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null, unforcedErrors: null, comments: null })),
   tieBreaks: [{ ...stamp, id: `${id}-t`, setId: `${id}-s1`, kind: 'standard', playerPoints: 7, opponentPoints: 0, netErrors: null, wideErrors: 0, longErrors: null, doubleFaults: null }],
 });
-const draftFixture = (matchId: string): VoiceDraft => ({ ...stamp, id: 'd', matchId, setId: `${matchId}-s2`, confirmationId: 'c', dataVersion: 1, recording: null, mimeType: null, transcripts: [], parsedDraft: null, state: 'recorded', error: null });
+const draftFixture = (matchId: string): VoiceDraft => ({ ...stamp, id: 'd', matchId, setId: `${matchId}-s2`, confirmationId: 'c', dataVersion: 2, recording: null, mimeType: null, transcripts: [], parsedDraft: null, state: 'recorded', error: null });
 let cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { await Promise.all(cleanup.map(fn => fn())); cleanup = []; });
 async function setup() {
@@ -81,7 +81,7 @@ describe('IndexedDB repository', () => {
   });
   it('round trips rich draft content without changing nulls, zeroes or audio', async () => {
     const repo = await setup(); await repo.saveMatchBundle(bundle('m'));
-    const draft: VoiceDraft = { ...draftFixture('m'), recording: new Blob(['audio'], { type: 'audio/mp4' }), mimeType: 'audio/mp4', transcripts: [{ text: 'first', provider: 'openai', model: 'test', timestamp: 'now' }, { text: 'second', provider: 'openai', model: 'test', timestamp: 'later' }], parsedDraft: { version: 1, warnings: ['warning'], games: [{ server: 'player', result: 'won', netErrors: 0, wideErrors: null, longErrors: null, doubleFaults: 0, failedReturns: null }] }, state: 'waiting-retry', error: { code: 'network', message: 'retry', phase: 'parser' } };
+    const draft: VoiceDraft = { ...draftFixture('m'), recording: new Blob(['audio'], { type: 'audio/mp4' }), mimeType: 'audio/mp4', transcripts: [{ text: 'first', provider: 'openai', model: 'test', timestamp: 'now' }, { text: 'second', provider: 'openai', model: 'test', timestamp: 'later' }], parsedDraft: { version: 2, warnings: ['warning'], games: [{ server: 'player', result: 'won', netErrors: 0, wideErrors: null, longErrors: null, doubleFaults: 0, failedReturns: null, unforcedErrors: null, comments: null }] }, state: 'waiting-retry', error: { code: 'network', message: 'retry', phase: 'parser' } };
     await repo.saveDraft(draft);
     const saved = await repo.getDraft('d');
     expect(saved).toEqual(draft);
@@ -169,7 +169,7 @@ describe('IndexedDB repository', () => {
     cleanup.push(async () => { repo.close(); await indexedDBDelete(name); });
     const initial = bundle('m');
     await repo.saveMatchBundle(initial);
-    const draft = { ...stamp, id: 'd', matchId: 'm', setId: 'm-s2', confirmationId: 'c', dataVersion: 1 as const, recording: new Blob(['audio'], { type: 'audio/mp4' }), mimeType: 'audio/mp4', transcripts: [{ text: 'hello', provider: 'openai', model: 'test', timestamp: stamp.createdAt }], parsedDraft: { version: 1 as const, games: [], warnings: [] }, state: 'ready' as const, error: null };
+    const draft = { ...stamp, id: 'd', matchId: 'm', setId: 'm-s2', confirmationId: 'c', dataVersion: 2 as const, recording: new Blob(['audio'], { type: 'audio/mp4' }), mimeType: 'audio/mp4', transcripts: [{ text: 'hello', provider: 'openai', model: 'test', timestamp: stamp.createdAt }], parsedDraft: { version: 2 as const, games: [], warnings: [] }, state: 'ready' as const, error: null };
     await repo.saveDraft(draft);
     expect(await repo.getDraft('d')).toEqual(draft);
     const prepared = { ...initial, games: [...initial.games, { ...initial.games[0], id: 'new-game', setId: 'm-s2' }] };

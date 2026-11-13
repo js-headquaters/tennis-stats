@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import type { Game, Match, MatchBundle } from './model';
-import { DASHBOARD_METRICS, calculateDashboard, calculateMetric, gamesPlayedInRange, getCalendarPeriod, type DashboardMetric } from './statistics';
+import { DASHBOARD_METRICS, calculateDashboard, effectiveUnforcedErrors, calculateMetric, gamesPlayedInRange, getCalendarPeriod, type DashboardMetric } from './statistics';
 
 // All dates are built from local-calendar components so assertions hold in any TZ.
 const local = (y: number, m: number, d: number, h = 0, min = 0, s = 0, ms = 0) => new Date(y, m - 1, d, h, min, s, ms);
 const ymd = (d: Date) => [d.getFullYear(), d.getMonth() + 1, d.getDate(), d.getHours(), d.getMinutes()];
 
-type Over = Partial<Pick<Game, 'server' | 'netErrors' | 'wideErrors' | 'longErrors' | 'doubleFaults' | 'failedReturns'>>;
+type Over = Partial<Pick<Game, 'unforcedErrors' | 'server' | 'netErrors' | 'wideErrors' | 'longErrors' | 'doubleFaults' | 'failedReturns'>>;
 let seq = 0;
 const game = (over: Over = {}): Game => ({
   id: `g${seq++}`, setId: 's1', ordinal: seq, server: 'player', result: 'won', score: null,
-  netErrors: null, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null,
+  netErrors: null, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null, unforcedErrors: null, comments: null,
   createdAt: '', updatedAt: '', ...over,
 });
 const bundle = (playedAt: Date, games: Game[]): MatchBundle => ({
@@ -147,5 +147,16 @@ describe('calculateDashboard', () => {
   });
   it('treats an average of zero with a sample as a real value', () => {
     expect(calculateDashboard([game({ netErrors: 0 })], [game({ netErrors: 2 })]).metrics.unforcedErrors.trend).toMatchObject({ state: 'compared', direction: 'lower' });
+  });
+});
+
+describe('effectiveUnforcedErrors', () => {
+  it('prefers the explicit total, falls back to details, else null', () => {
+    expect(effectiveUnforcedErrors(game({ unforcedErrors: 0, netErrors: 4 }))).toBe(0);
+    expect(effectiveUnforcedErrors(game({ unforcedErrors: null, netErrors: 2, wideErrors: null, longErrors: 1 }))).toBe(3);
+    expect(effectiveUnforcedErrors(game({ unforcedErrors: null, netErrors: null, wideErrors: null, longErrors: null }))).toBeNull();
+  });
+  it('feeds calculateMetric', () => {
+    expect(calculateMetric([game({ unforcedErrors: 5, netErrors: 1 }), game({ netErrors: 1 })], 'unforcedErrors')).toEqual({ key: 'unforcedErrors', average: 3, sampleSize: 2 });
   });
 });

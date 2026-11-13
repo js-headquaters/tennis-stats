@@ -12,12 +12,12 @@ export type SetKind = 'standard' | 'decidingSuperTiebreak';
 export type SetStatus = 'active' | 'completed' | 'unfinished';
 export interface TennisSet extends PersistedEntity { matchId: string; ordinal: number; kind: SetKind; status: SetStatus; tieBreakId: string | null }
 export type GameScore = { player: '0' | '15' | '30' | '40' | 'AD'; opponent: '0' | '15' | '30' | '40' | 'AD' };
-export interface Game extends PersistedEntity { setId: string; ordinal: number; server: Server; result: MatchResult; score: GameScore | null; netErrors: number | null; wideErrors: number | null; longErrors: number | null; doubleFaults: number | null; failedReturns: number | null }
+export interface Game extends PersistedEntity { setId: string; ordinal: number; server: Server; result: MatchResult; score: GameScore | null; netErrors: number | null; wideErrors: number | null; longErrors: number | null; doubleFaults: number | null; failedReturns: number | null; unforcedErrors: number | null; comments: string | null }
 export type TieBreakKind = 'standard' | 'super';
 export interface TieBreak extends PersistedEntity { setId: string; kind: TieBreakKind; playerPoints: number; opponentPoints: number; netErrors: number | null; wideErrors: number | null; longErrors: number | null; doubleFaults: number | null }
-export interface DraftGame { server: Server; result: MatchResult; netErrors: number | null; wideErrors: number | null; longErrors: number | null; doubleFaults: number | null; failedReturns: number | null }
-export interface ParsedDraft { version: 1; games: DraftGame[]; warnings: string[] }
-export interface VoiceDraft extends PersistedEntity { matchId: string; setId: string; confirmationId: string; dataVersion: 1; recording: Blob | null; mimeType: string | null; transcripts: Array<{ text: string; provider: string; model: string; timestamp: string }>; parsedDraft: ParsedDraft | null; state: 'recorded' | 'processing' | 'waiting-retry' | 'ready' | 'error' | 'confirming'; error: { code: string; message: string; phase?: 'transcription' | 'parser' } | null }
+export interface DraftGame { server: Server; result: MatchResult; netErrors: number | null; wideErrors: number | null; longErrors: number | null; doubleFaults: number | null; failedReturns: number | null; unforcedErrors: number | null; comments: string | null }
+export interface ParsedDraft { version: 2; games: DraftGame[]; warnings: string[] }
+export interface VoiceDraft extends PersistedEntity { matchId: string; setId: string; confirmationId: string; dataVersion: 2; recording: Blob | null; mimeType: string | null; transcripts: Array<{ text: string; provider: string; model: string; timestamp: string }>; parsedDraft: ParsedDraft | null; state: 'recorded' | 'processing' | 'waiting-retry' | 'ready' | 'error' | 'confirming'; error: { code: string; message: string; phase?: 'transcription' | 'parser' } | null }
 export interface MatchBundle { match: Match; opponent: Opponent; sets: TennisSet[]; games: Game[]; tieBreaks: TieBreak[] }
 /** The tennis entities (no drafts, no metadata) — the content of a backup and of an insert-only import. */
 export interface TennisRecords { opponents: Opponent[]; matches: Match[]; sets: TennisSet[]; games: Game[]; tieBreaks: TieBreak[] }

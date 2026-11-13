@@ -9,7 +9,7 @@ import DraftReviewPage from './DraftReviewPage';
 import { dependencies } from '../../app/dependencies';
 import { workRegistry } from '../../app/workGuard';
 
-const draft: VoiceDraft = { id:'d', matchId:'m', setId:'s', confirmationId:'c', dataVersion:1, recording:null, mimeType:null, transcripts:[{ text:'Original transcript', provider:'provider', model:'model', timestamp:'now' }], parsedDraft:{ version:1, games:[{ server:'player', result:'won', netErrors:null, wideErrors:0, longErrors:null, doubleFaults:null, failedReturns:null }], warnings:['Check score'] }, state:'ready', error:null, createdAt:'now', updatedAt:'now' };
+const draft: VoiceDraft = { id:'d', matchId:'m', setId:'s', confirmationId:'c', dataVersion:2, recording:null, mimeType:null, transcripts:[{ text:'Original transcript', provider:'provider', model:'model', timestamp:'now' }], parsedDraft:{ version:2, games:[{ server:'player', result:'won', netErrors:null, wideErrors:0, longErrors:null, doubleFaults:null, failedReturns: null, unforcedErrors: null, comments: null }], warnings:['Check score'] }, state:'ready', error:null, createdAt:'now', updatedAt:'now' };
 const style = document.createElement('style'); style.textContent = readFileSync(resolve(process.cwd(), 'src/styles/global.css'), 'utf8'); document.head.append(style);
 const fittingBundle = { match:{ id:'m', status:'active' }, sets:[{ id:'s', matchId:'m', status:'active', kind:'standard', tieBreakId:null }], games:[], tieBreaks:[] };
 it('shows the saved draft without invoking providers or recording and confirms only on click', async () => {
@@ -45,8 +45,25 @@ it('saves zero and null through the service without writing match data', async (
   const { service, repository } = setup(); const card = await screen.findByRole('form', { name:'Draft game 1' });
   fireEvent.change(within(card).getByLabelText('Net errors'), { target:{ value:'0' } });
   fireEvent.click(within(card).getByRole('button', { name:'Save game 1' }));
-  await waitFor(() => expect(service.updateDraftGame).toHaveBeenCalledWith('d', 0, expect.objectContaining({ netErrors:0, longErrors:null, failedReturns:null })));
+  await waitFor(() => expect(service.updateDraftGame).toHaveBeenCalledWith('d', 0, expect.objectContaining({ netErrors:0, longErrors:null, failedReturns: null })));
   expect(service.confirmDraft).not.toHaveBeenCalled(); expect(repository.close).not.toHaveBeenCalled();
+});
+it('reviews and saves each game comment and total through the service', async () => {
+  const withComments: VoiceDraft = { ...draft, parsedDraft:{ ...draft.parsedDraft!, games:[{ ...draft.parsedDraft!.games[0], unforcedErrors:2, comments:'Stayed calm' }, { server:'opponent', result:'lost', netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns:1, unforcedErrors:3, comments:'Late on the backhand' }] } };
+  const { service } = setup(withComments);
+  const second = await screen.findByRole('form', { name:'Draft game 2' });
+  expect(within(screen.getByRole('form', { name:'Draft game 1' })).getByLabelText('Game comment')).toHaveValue('Stayed calm');
+  expect(within(second).getByLabelText('Game comment')).toHaveValue('Late on the backhand');
+  expect(within(second).getByLabelText('Receive errors')).toHaveValue('1');
+  fireEvent.change(within(second).getByLabelText('Game comment'), { target:{ value:' Rushed the return ' } });
+  fireEvent.change(within(second).getByLabelText('Unforced errors'), { target:{ value:'4' } });
+  fireEvent.click(within(second).getByRole('button', { name:'Save game 2' }));
+  await waitFor(() => expect(service.updateDraftGame).toHaveBeenCalledWith('d', 1, expect.objectContaining({ comments:'Rushed the return', unforcedErrors:4, failedReturns:1, doubleFaults:null })));
+});
+it('keeps confirmation disabled for a draft without games', async () => {
+  const { service } = setup({ ...draft, parsedDraft:{ ...draft.parsedDraft!, games:[] } });
+  const confirm = await screen.findByRole('button', { name:'Confirm and add' });
+  expect(confirm).toBeDisabled(); fireEvent.click(confirm); expect(service.confirmDraft).not.toHaveBeenCalled();
 });
 it('retains parsed games after retry failure and locks duplicate retry', async () => {
   const { service } = setup({ ...draft, state:'waiting-retry', error:{ code:'offline', message:'ignored' } });

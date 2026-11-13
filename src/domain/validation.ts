@@ -1,5 +1,13 @@
 import type { Game, ValidationIssue, ValidationResult } from './model';
 
+export const GAME_COMMENT_MAX_LENGTH = 10_000;
+
+export function normalizeGameComment(value: string | null): string | null {
+  if (value === null) return null;
+  const trimmed = value.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
 export function normalizeOpponentName(name: string): string {
   return name.trim();
 }
@@ -15,10 +23,11 @@ export function validateGame(input: Game): ValidationResult<Game> {
   if (input.score !== null && (!input.score || typeof input.score !== 'object' || !allowedPoints.includes(input.score.player) || !allowedPoints.includes(input.score.opponent))) {
     issues.push({ field: 'score', message: "Must be null or a pair of allowed score strings ('0', '15', '30', '40', 'AD')" });
   }
-  for (const field of ['netErrors', 'wideErrors', 'longErrors', 'doubleFaults', 'failedReturns'] as const) {
+  for (const field of ['netErrors', 'wideErrors', 'longErrors', 'doubleFaults', 'failedReturns', 'unforcedErrors'] as const) {
     const value = input[field];
     if (value !== null && (!Number.isInteger(value) || value < 0)) issues.push({ field, message: 'Must be a non-negative integer or null' });
   }
+  if (input.comments !== null && (typeof input.comments !== 'string' || input.comments.length > GAME_COMMENT_MAX_LENGTH)) issues.push({ field: 'comments', message: `Must be null or text of at most ${GAME_COMMENT_MAX_LENGTH} characters` });
   if (input.failedReturns !== null && input.server === 'player') issues.push({ field: 'failedReturns', message: 'Only valid when the opponent served' });
   if (input.doubleFaults !== null && input.server === 'opponent') issues.push({ field: 'doubleFaults', message: 'Only valid when the player served' });
   return issues.length ? { ok: false, issues } : { ok: true, value: input };
