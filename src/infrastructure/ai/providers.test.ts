@@ -7,7 +7,7 @@ import { redactProviderError, SafeProviderError } from './common';
 
 const key = 'SENTINEL_FAKE_KEY';
 const config = { provider: 'openai' as const, model: 'test', endpoint: '', apiKey: key };
-const draft = { version: 1, games: [{ server: 'player', result: 'won', netErrors: null, wideErrors: 0, longErrors: null, doubleFaults: 0, failedReturns: null, unforcedErrors: null, comments: null }], warnings: [] };
+const draft = { version: 2, games: [{ server: 'player', result: 'won', netErrors: null, wideErrors: 0, longErrors: null, doubleFaults: 0, failedReturns: null, unforcedErrors: null, comments: null }], warnings: [] };
 it('rejects insecure or credential-bearing endpoints before sending keys', async () => {
   for (const endpoint of ['http://example.com/v1', 'http://192.168.1.1/v1', 'https://user:pass@example.com/v1', `https://example.com/v1?key=${key}`, 'https://example.com/v1#secret']) {
     const fetcher = vi.fn();

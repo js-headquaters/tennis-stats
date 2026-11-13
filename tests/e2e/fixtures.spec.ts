@@ -18,14 +18,14 @@ test('@smoke fixtures and specs contain no real key-shaped strings', () => {
   }
 });
 
-const draftFor = (matchId: string, setId: string) => ({ id: 'd1', matchId, setId, confirmationId: 'c1', dataVersion: 1 as const, recording: { type: 'audio/mp4', text: 'abc' }, mimeType: 'audio/mp4', transcripts: [], parsedDraft: null, state: 'recorded' as const, error: null, createdAt: '2026-03-14T10:00:00.000Z', updatedAt: '2026-03-14T10:00:00.000Z' });
+const draftFor = (matchId: string, setId: string) => ({ id: 'd1', matchId, setId, confirmationId: 'c1', dataVersion: 2 as const, recording: { type: 'audio/mp4', text: 'abc' }, mimeType: 'audio/mp4', transcripts: [], parsedDraft: null, state: 'recorded' as const, error: null, createdAt: '2026-03-14T10:00:00.000Z', updatedAt: '2026-03-14T10:00:00.000Z' });
 
 test('seedDatabase round-trips through the app database and readDatabase', async ({ page }) => {
   const bundle = buildMatchBundle({ id: 'm1', opponent: 'Alex Example', sets: [{ games: [{ result: 'won', netErrors: 0 }, 'L'] }] });
   await seedDatabase(page, buildSnapshot({ bundles: [bundle], metadata: [{ key: 'confirmed:x', value: { draftId: 'x', matchId: 'm1', confirmedAt: bundle.match.createdAt } }] }), { then: '#/matches' });
   await expect(page.getByRole('link', { name: 'Alex Example' })).toBeVisible();
   const stored = await readDatabase(page);
-  expect(stored.dataVersion).toBe(2);
+  expect(stored.dataVersion).toBe(3);
   expect(stored.matches).toEqual([bundle.match]);
   expect(stored.games).toEqual(bundle.games);
   expect(stored.games[0]).toMatchObject({ server: 'player', netErrors: 0, wideErrors: null });
@@ -57,7 +57,7 @@ test('mockAi answers provider calls with adapter-shaped, CORS-readable replies',
   }, { endpoints: AI_ENDPOINTS, key: FAKE_API_KEY });
   expect(results.transcription).toEqual({ text: 'one game' });
   expect(results.limited).toBe(429);
-  expect(JSON.parse(results.openai.choices[0].message.content)).toEqual({ version: 1, games: [{ server: 'player', result: 'won', netErrors: null, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null }], warnings: [] });
+  expect(JSON.parse(results.openai.choices[0].message.content)).toEqual({ version: 2, games: [{ server: 'player', result: 'won', netErrors: null, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null, unforcedErrors: null, comments: null }], warnings: [] });
   expect(JSON.parse(results.anthropic.content[0].text).games).toHaveLength(1);
   expect(results.failed).toBe('blocked');
   expect(ai.calls.map(call => call.kind)).toEqual(['transcription', 'openai-parser', 'openai-parser', 'anthropic-parser', 'unexpected']);

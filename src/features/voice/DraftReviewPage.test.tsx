@@ -9,7 +9,7 @@ import DraftReviewPage from './DraftReviewPage';
 import { dependencies } from '../../app/dependencies';
 import { workRegistry } from '../../app/workGuard';
 
-const draft: VoiceDraft = { id:'d', matchId:'m', setId:'s', confirmationId:'c', dataVersion:1, recording:null, mimeType:null, transcripts:[{ text:'Original transcript', provider:'provider', model:'model', timestamp:'now' }], parsedDraft:{ version:1, games:[{ server:'player', result:'won', netErrors:null, wideErrors:0, longErrors:null, doubleFaults:null, failedReturns: null, unforcedErrors: null, comments: null }], warnings:['Check score'] }, state:'ready', error:null, createdAt:'now', updatedAt:'now' };
+const draft: VoiceDraft = { id:'d', matchId:'m', setId:'s', confirmationId:'c', dataVersion:2, recording:null, mimeType:null, transcripts:[{ text:'Original transcript', provider:'provider', model:'model', timestamp:'now' }], parsedDraft:{ version:2, games:[{ server:'player', result:'won', netErrors:null, wideErrors:0, longErrors:null, doubleFaults:null, failedReturns: null, unforcedErrors: null, comments: null }], warnings:['Check score'] }, state:'ready', error:null, createdAt:'now', updatedAt:'now' };
 const style = document.createElement('style'); style.textContent = readFileSync(resolve(process.cwd(), 'src/styles/global.css'), 'utf8'); document.head.append(style);
 const fittingBundle = { match:{ id:'m', status:'active' }, sets:[{ id:'s', matchId:'m', status:'active', kind:'standard', tieBreakId:null }], games:[], tieBreaks:[] };
 it('shows the saved draft without invoking providers or recording and confirms only on click', async () => {

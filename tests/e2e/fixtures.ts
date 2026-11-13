@@ -324,7 +324,7 @@ export async function mockAi(page: Page, initial: AiScenario = aiScenarios.succe
     const index = counts[kind] = (counts[kind] ?? -1) + 1; // parser calls share one sequence across providers
     return list[Math.min(index, list.length - 1)];
   };
-  const parsed = () => JSON.stringify({ version: 1, games: draftGamesFor(scenario), warnings: scenario.warnings ?? [] });
+  const parsed = () => JSON.stringify({ version: 2, games: draftGamesFor(scenario), warnings: scenario.warnings ?? [] });
   async function handle(route: Route, request: Request) {
     const url = request.url().split('?')[0];
     const kind: AiCallKind = url === AI_ENDPOINTS.transcription ? 'transcription' : url === AI_ENDPOINTS.openAiParser ? 'openai-parser' : url === AI_ENDPOINTS.anthropicParser ? 'anthropic-parser' : 'unexpected';

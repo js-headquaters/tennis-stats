@@ -20,7 +20,7 @@ async function setup() {
   const ids = { next: () => `id-${++n}` };
   const match = await startMatch({ opponentName: 'Alex', playedAt: clock.now(), firstServer: 'player' }, { repository, ids, clock });
   const transcriber = { transcribe: vi.fn<TranscriptionProvider['transcribe']>(async () => ({ text: 'won', provider: 'test', model: 'model' })) };
-  const parsed = { version: 1 as const, games: [{ server: 'player' as const, result: 'won' as const, netErrors: 0, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null, unforcedErrors: null, comments: null }], warnings: ['check'] };
+  const parsed = { version: 2 as const, games: [{ server: 'player' as const, result: 'won' as const, netErrors: 0, wideErrors: null, longErrors: null, doubleFaults: null, failedReturns: null, unforcedErrors: null, comments: null }], warnings: ['check'] };
   const parser = { parse: vi.fn<StatisticsParser['parse']>(async () => parsed) };
   const isOnline = vi.fn(() => true);
   const scheduler = manualScheduler();

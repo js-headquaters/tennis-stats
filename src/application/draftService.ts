@@ -16,7 +16,7 @@ export const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
 type AudioInput = { audio: Blob; mimeType: string };
 const metric = z.number().int().nonnegative().nullable();
 const gameSchema = z.object({ server: z.enum(['player', 'opponent']), result: z.enum(['won', 'lost']), netErrors: metric, wideErrors: metric, longErrors: metric, doubleFaults: metric, failedReturns: metric, unforcedErrors: metric.default(null), comments: z.string().nullable().default(null) }).strict().refine(g => g.server === 'player' ? g.failedReturns === null : g.doubleFaults === null);
-const draftSchema = z.object({ version: z.literal(1), games: z.array(gameSchema), warnings: z.array(z.string()) }).strict();
+const draftSchema = z.object({ version: z.literal(2), games: z.array(gameSchema), warnings: z.array(z.string()) }).strict();
 const messages = { auth: 'Provider authentication failed.', rate: 'Provider rate limit reached.', network: 'Provider network request failed.', config: 'Provider configuration is invalid.', 'invalid-response': 'Provider returned an invalid response.', cancelled: 'Processing cancelled.', timeout: 'Provider request timed out.', offline: 'Waiting for an internet connection.' } as const;
 
 export class DraftStorageError extends Error {
@@ -127,7 +127,7 @@ export function createDraftService({ repository, transcriber, parser, clock, ids
   }
   function persistDraftFromAudio(input: AudioInput & { matchId: string; setId: string }) {
     const now = clock.now();
-    const draft: VoiceDraft = { id: ids.next(), confirmationId: ids.next(), matchId: input.matchId, setId: input.setId, dataVersion: 1, recording: input.audio, mimeType: input.mimeType, transcripts: [], parsedDraft: null, state: 'recorded', error: null, createdAt: now, updatedAt: now };
+    const draft: VoiceDraft = { id: ids.next(), confirmationId: ids.next(), matchId: input.matchId, setId: input.setId, dataVersion: 2, recording: input.audio, mimeType: input.mimeType, transcripts: [], parsedDraft: null, state: 'recorded', error: null, createdAt: now, updatedAt: now };
     return guard(draft.id, async () => { await applicable(draft); return save(draft); });
   }
   async function createDraftFromAudio(input: AudioInput & { matchId: string; setId: string }, signal: AbortSignal) {

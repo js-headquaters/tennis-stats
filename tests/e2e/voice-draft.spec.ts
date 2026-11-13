@@ -302,7 +302,7 @@ test.describe('provider secret redaction', () => {
 
 test.describe('iOS/WebKit microphone fallback to manual entry', () => {
   const retained: SeedDraft = {
-    id: 'retained-draft', confirmationId: 'retained-confirmation', matchId: MATCH_ID, setId: SET_ID, dataVersion: 1,
+    id: 'retained-draft', confirmationId: 'retained-confirmation', matchId: MATCH_ID, setId: SET_ID, dataVersion: 2,
     recording: { type: 'audio/mp4', text: 'EARLIER-AUDIO' }, mimeType: 'audio/mp4', transcripts: [], parsedDraft: null, state: 'waiting-retry',
     error: { code: 'offline', message: 'Waiting for an internet connection.', phase: 'transcription' }, createdAt: FIXED_NOW, updatedAt: FIXED_NOW,
   };
