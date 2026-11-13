@@ -60,11 +60,11 @@
   export function diagnosticsToDelete(rows: Pick<MatchDiagnostic, 'id' | 'startedAt' | 'outcome'>[], cap?: number): string[]; // ids to delete so that rows.length <= cap
   ```
 
-- [ ] **Step 1: Write failing tests** in `src/domain/diagnostics.test.ts`: `boundText('abc')` → `{ value:'abc', truncated:false, originalLength:3 }`; `boundText('x'.repeat(10), 4)` → `{ value:'xxxx', truncated:true, originalLength:10 }`; `diagnosticsToDelete` with 5 rows (2 `success` oldest, 3 `error`) and `cap=3` returns the two success ids; with 4 errors and `cap=3` returns the single oldest error id; with `rows.length <= cap` returns `[]`; ordering is by `startedAt` ascending, ties by array order.
-- [ ] **Step 2: Run** `npx vitest run src/domain/diagnostics.test.ts` — expect FAIL (module missing).
-- [ ] **Step 3: Implement** the types and the two functions as specified above; `diagnosticsToDelete` removes the oldest `success` rows first, then the oldest of the rest.
-- [ ] **Step 4: Run** the test file — expect PASS; run `npm run typecheck`.
-- [ ] **Step 5: Commit** `feat: add voice diagnostic types and bounded text helper`.
+- [x] **Step 1: Write failing tests** in `src/domain/diagnostics.test.ts`: `boundText('abc')` → `{ value:'abc', truncated:false, originalLength:3 }`; `boundText('x'.repeat(10), 4)` → `{ value:'xxxx', truncated:true, originalLength:10 }`; `diagnosticsToDelete` with 5 rows (2 `success` oldest, 3 `error`) and `cap=3` returns the two success ids; with 4 errors and `cap=3` returns the single oldest error id; with `rows.length <= cap` returns `[]`; ordering is by `startedAt` ascending, ties by array order.
+- [x] **Step 2: Run** `npx vitest run src/domain/diagnostics.test.ts` — expect FAIL (module missing).
+- [x] **Step 3: Implement** the types and the two functions as specified above; `diagnosticsToDelete` removes the oldest `success` rows first, then the oldest of the rest.
+- [x] **Step 4: Run** the test file — expect PASS; run `npm run typecheck`.
+- [x] **Step 5: Commit** `feat: add voice diagnostic types and bounded text helper`.
 
 ---
 
