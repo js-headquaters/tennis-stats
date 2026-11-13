@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { dependencies } from '../../app/dependencies';
+import { buildDiagnosticsExport } from '../../application/diagnosticsExport';
 import { deleteGame, updateComments, updateGame, updateMatchDetails, updateTieBreak, type CorrectionResult, type GameConflict, type MatchDetailsPatch, type MatchServiceDeps } from '../../application/matchService';
 import type { Game, MatchBundle, TieBreak } from '../../domain/model';
 import { evaluateStoredMatch } from '../../domain/scoring';
+import { createBrowserFileTransfer, FileTransferError, type FileTransfer } from '../../infrastructure/backup/fileTransfer';
 import { formatDay } from '../dashboard/periods';
 import CorrectionConfirmation from './CorrectionConfirmation';
 import GameForm from './GameForm';
@@ -30,12 +32,13 @@ function result(bundle: MatchBundle) {
 }
 
 /** View and correct a stored match in place. Corrections never change `match.status`. */
-export default function MatchDetailsPage({ deps }: { deps?: MatchServiceDeps }) {
+export default function MatchDetailsPage({ deps, transfer }: { deps?: MatchServiceDeps; transfer?: FileTransfer }) {
   const { matchId = '' } = useParams();
-  return <MatchDetailsContent key={matchId} matchId={matchId} deps={deps} />;
+  return <MatchDetailsContent key={matchId} matchId={matchId} deps={deps} transfer={transfer} />;
 }
 
-function MatchDetailsContent({ deps, matchId }: { deps?: MatchServiceDeps; matchId: string }) {
+function MatchDetailsContent({ deps, matchId, transfer: injected }: { deps?: MatchServiceDeps; matchId: string; transfer?: FileTransfer }) {
+  const [transfer] = useState(() => injected ?? createBrowserFileTransfer()); const [diagnosticCount, setDiagnosticCount] = useState(0);
   const [services, setServices] = useState<MatchServiceDeps>(); const [bundle, setBundle] = useState<MatchBundle>();
   const [loading, setLoading] = useState(true); const [loadError, setLoadError] = useState(''); const [attempt, setAttempt] = useState(0);
   const [error, setError] = useState(''); const [notice, setNotice] = useState(''); const [busy, setBusy] = useState(false); const lock = useRef(false);
@@ -49,7 +52,9 @@ function MatchDetailsContent({ deps, matchId }: { deps?: MatchServiceDeps; match
         if (!deps) owned = current;
         if (cancelled) { closeOwned(); return; }
         const found = await current.repository.getMatchBundle(matchId);
-        if (!cancelled) { setServices(current); setBundle(found); setComments(found?.match.comments ?? ''); setLoading(false); }
+        let count = 0;
+        try { count = (await current.repository.countDiagnostics(matchId)) || 0; } catch { count = 0; }
+        if (!cancelled) { setDiagnosticCount(count); setServices(current); setBundle(found); setComments(found?.match.comments ?? ''); setLoading(false); }
       } catch (e) { closeOwned(); if (!cancelled) { setLoadError(e instanceof Error ? e.message : 'Unable to load match'); setLoading(false); } }
     }
     void load(); return () => { cancelled = true; closeOwned(); };
@@ -59,6 +64,14 @@ function MatchDetailsContent({ deps, matchId }: { deps?: MatchServiceDeps; match
     if (lock.current) return; lock.current = true; setBusy(true); setError(''); setNotice('');
     try { await work(); } catch (e) { setError(e instanceof Error ? e.message : 'Could not save the correction. Please try again.'); }
     finally { lock.current = false; setBusy(false); }
+  }
+  async function downloadDiagnostics(current: MatchBundle, deps: MatchServiceDeps) {
+    await run(async () => {
+      try {
+        const { fileName, text } = buildDiagnosticsExport(current, await deps.repository.listDiagnostics(current.match.id), deps.clock.now());
+        transfer.download(fileName, text); setNotice('Voice diagnostics downloaded.');
+      } catch (e) { setError(`Could not download voice diagnostics. ${e instanceof FileTransferError ? `${e.message} ` : ''}Please try again.`); }
+    });
   }
   function applied(next: MatchBundle, message: string) { setBundle(next); setCorrection(undefined); setEditing(undefined); setNotice(message); }
   /** Task 7 flow: preview first; conflicting corrections wait for explicit confirmation. */
@@ -105,5 +118,9 @@ function MatchDetailsContent({ deps, matchId }: { deps?: MatchServiceDeps; match
     <form aria-label="Match comments" onSubmit={e => { e.preventDefault(); void run(async () => { setBundle(await updateComments(bundle.match.id, comments || null, services)); setNotice('Comments saved.'); }); }}>
       <label>Comments<textarea value={comments} onChange={e => setComments(e.target.value)} /></label><button type="submit" disabled={blocked}>Save comments</button>
     </form>
+    {diagnosticCount > 0 && <section aria-label="Voice diagnostics">
+      <p>Voice diagnostics: {diagnosticCount} {diagnosticCount === 1 ? 'event' : 'events'}</p>
+      <button type="button" disabled={busy} onClick={() => void downloadDiagnostics(bundle, services)}>Download voice diagnostics</button>
+    </section>}
   </section>;
 }

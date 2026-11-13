@@ -7,7 +7,8 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, expect, it, vi } from 'vitest';
 import { startMatch, type MatchServiceDeps } from '../../application/matchService';
 import type { TennisRepository } from '../../application/ports';
-import type { Game, MatchBundle, MatchStatus, Server } from '../../domain/model';
+import type { Game, MatchBundle, MatchDiagnostic, MatchStatus, Server } from '../../domain/model';
+import { FileTransferError, type FileTransfer } from '../../infrastructure/backup/fileTransfer';
 import { openDatabase } from '../../infrastructure/db/database';
 import MatchDetailsPage from './MatchDetailsPage';
 
@@ -56,8 +57,8 @@ async function seeded(...bundles: MatchBundle[]) {
   let id = 0;
   return { repository, clock: { now: () => '2026-11-12T12:00:00.000Z' }, ids: { next: () => `new-${++id}` } } satisfies MatchServiceDeps;
 }
-function show(deps: MatchServiceDeps | undefined, id = 'm1') {
-  return render(<MemoryRouter initialEntries={[`/matches/${id}`]}><Routes><Route path="/matches/:matchId" element={<MatchDetailsPage deps={deps} />} /></Routes></MemoryRouter>);
+function show(deps: MatchServiceDeps | undefined, id = 'm1', transfer?: FileTransfer) {
+  return render(<MemoryRouter initialEntries={[`/matches/${id}`]}><Routes><Route path="/matches/:matchId" element={<MatchDetailsPage deps={deps} transfer={transfer} />} /></Routes></MemoryRouter>);
 }
 const set = (ordinal: number) => screen.getByRole('region', { name: `Set ${ordinal}` });
 const stored = async (deps: MatchServiceDeps, id = 'm1') => (await deps.repository.getMatchBundle(id))!;
@@ -262,4 +263,59 @@ it('in read-only recovery mode keeps the match viewable but disables every corre
   expect(controls.length).toBeGreaterThan(4);
   for (const control of controls) { expect(control).toBeDisabled(); fireEvent.click(control); }
   expect(save).not.toHaveBeenCalled();
+});
+
+function diagRow(id: string, startedAt: string): MatchDiagnostic {
+  return { id, matchId: 'm1', setId: null, draftId: null, phase: 'parser', attempt: 1, provider: 'p', model: 'mod', startedAt, finishedAt: startedAt, outcome: 'success', transcript: null, request: null, response: null, error: null };
+}
+const fakeTransfer = (download = vi.fn()): FileTransfer => ({ download, readText: vi.fn() });
+
+it('hides voice diagnostics when the match has no rows', async () => {
+  const deps = await seeded(completed());
+  show(deps, 'm1', fakeTransfer()); await screen.findByText('Completed');
+  expect(screen.queryByRole('button', { name: 'Download voice diagnostics' })).not.toBeInTheDocument();
+  expect(screen.queryByText(/Voice diagnostics:/)).not.toBeInTheDocument();
+});
+
+it('downloads saved voice diagnostics', async () => {
+  const deps = await seeded(completed());
+  await deps.repository.saveDiagnostic(diagRow('d2', '2026-11-10T10:00:02.000Z')); await deps.repository.saveDiagnostic(diagRow('d1', '2026-11-10T10:00:01.000Z'));
+  const download = vi.fn(); show(deps, 'm1', fakeTransfer(download));
+  expect(await screen.findByText('Voice diagnostics: 2 events')).toBeInTheDocument();
+  const button = screen.getByRole('button', { name: 'Download voice diagnostics' });
+  fireEvent.click(button);
+  await screen.findByText('Voice diagnostics downloaded.');
+  expect(download).toHaveBeenCalledTimes(1);
+  const [name, text] = download.mock.calls[0];
+  expect(name).toBe('tennis-stats-voice-diagnostics-m1-2026-11-12.json');
+  expect(JSON.parse(text).diagnostics.map((r: { id: string }) => r.id)).toEqual(['d1', 'd2']);
+});
+
+it('downloads voice diagnostics in read-only recovery mode', async () => {
+  const name = `details-diag-recovery-${crypto.randomUUID()}`;
+  const seededRepo = await openDatabase(name); await seededRepo.saveMatchBundle(completed()); await seededRepo.saveDiagnostic(diagRow('d1', '2026-11-10T10:00:01.000Z')); seededRepo.close();
+  const repository = await openDatabase(name, async () => { throw new Error('migration failed'); }); repos.push(repository);
+  const download = vi.fn();
+  show({ repository, clock: { now: () => '2026-11-12T12:00:00.000Z' }, ids: { next: () => 'x' } }, 'm1', fakeTransfer(download));
+  const button = await screen.findByRole('button', { name: 'Download voice diagnostics' });
+  expect(button).toBeEnabled(); fireEvent.click(button);
+  await screen.findByText('Voice diagnostics downloaded.');
+  expect(download).toHaveBeenCalledTimes(1);
+});
+
+it('shows an alert when the diagnostics download fails and stays usable', async () => {
+  const deps = await seeded(completed());
+  await deps.repository.saveDiagnostic(diagRow('d1', '2026-11-10T10:00:01.000Z'));
+  show(deps, 'm1', fakeTransfer(vi.fn(() => { throw new FileTransferError('The browser blocked the download.'); })));
+  fireEvent.click(await screen.findByRole('button', { name: 'Download voice diagnostics' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('The browser blocked the download.');
+  expect(screen.getByRole('button', { name: 'Download voice diagnostics' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Save comments' })).toBeEnabled();
+});
+
+it('treats a diagnostics count failure as zero', async () => {
+  const deps = await seeded(completed());
+  vi.spyOn(deps.repository, 'countDiagnostics').mockRejectedValue(new Error('boom'));
+  show(deps, 'm1', fakeTransfer()); await screen.findByText('Completed');
+  expect(screen.queryByRole('button', { name: 'Download voice diagnostics' })).not.toBeInTheDocument();
 });
