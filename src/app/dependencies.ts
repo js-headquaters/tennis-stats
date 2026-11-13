@@ -26,15 +26,15 @@ export const dependencies = {
   createRecorder: createAudioRecorder,
   createDraftService: (repository: TennisRepository) => createDraftService({
     repository, clock: dependencies.clock, ids: dependencies.ids, isOnline: () => navigator.onLine,
-    transcriber: { async transcribe(request, signal) {
+    transcriber: { async transcribe(request, signal, trace) {
       const config = configured(() => createLocalSettings(localStorage).getTranscription());
       if (config.provider !== 'openai') throw { code: 'config' };
-      return createOpenAiTranscription(config).transcribe(request, signal);
+      return createOpenAiTranscription(config).transcribe(request, signal, trace);
     } },
-    parser: { async parse(request, signal) {
+    parser: { async parse(request, signal, trace) {
       const config = configured(() => createLocalSettings(localStorage).getParser());
       if (config.provider !== 'openai' && config.provider !== 'anthropic') throw { code: 'config' };
-      return (config.provider === 'anthropic' ? createAnthropicParser(config) : createOpenAiParser(config)).parse(request, signal);
+      return (config.provider === 'anthropic' ? createAnthropicParser(config) : createOpenAiParser(config)).parse(request, signal, trace);
     } },
   }),
 };

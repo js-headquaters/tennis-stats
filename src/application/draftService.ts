@@ -1,6 +1,7 @@
 import { z } from 'zod';
-import type { Clock, IdGenerator, ParserMatchContext, StatisticsParser, TennisRepository, TranscriptionProvider } from './ports';
-import type { DraftGame, MatchBundle, VoiceDraft } from '../domain/model';
+import type { AttemptTrace, Clock, IdGenerator, ParserMatchContext, StatisticsParser, TennisRepository, TranscriptionProvider } from './ports';
+import type { DiagnosticText, DraftGame, MatchBundle, MatchDiagnostic, VoiceDraft } from '../domain/model';
+import { boundText, DIAGNOSTIC_BODY_LIMIT } from '../domain/diagnostics';
 import { validateGame } from '../domain/validation';
 import { nextGameServer, prepareGames } from './matchService';
 import { evaluateSet } from '../domain/scoring';
@@ -47,6 +48,19 @@ export function parserContext(bundle: MatchBundle, setId: string): ParserMatchCo
   return { format: bundle.match.format, setKind: set.kind, playerGames: score.playerGames, opponentGames: score.opponentGames, gamesRecorded: games.length, expectedNextServer: nextGameServer(bundle) };
 }
 
+/** Collects the raw data of one provider attempt (see `AttemptTrace`). */
+function createTrace() {
+  const data: { provider?: string; model?: string; request?: string; response?: string; http?: { status: number; body: string } } = {};
+  const trace: AttemptTrace = {
+    target(provider, model) { data.provider = provider; data.model = model; },
+    request(text) { data.request = text; },
+    response(text) { data.response = text; },
+    httpError(status, body) { data.http = { status, body }; },
+  };
+  return { trace, data };
+}
+type TraceData = ReturnType<typeof createTrace>['data'];
+
 export function createDraftService({ repository, transcriber, parser, clock, ids, isOnline, requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, scheduler = defaultScheduler }: Deps) {
   const busy = new Set<string>();
   const confirmations = new Map<string, Promise<{ status: 'confirmed' | 'alreadyConfirmed'; bundle: MatchBundle }>>();
@@ -88,41 +102,63 @@ export function createDraftService({ repository, transcriber, parser, clock, ids
       return await Promise.race([running, stopped]);
     } finally { cancelTimer(); signal.removeEventListener('abort', onAbort); }
   }
+  /** Writes one diagnostic row. Awaited by the caller but never throws and never changes the draft result. */
+  async function recordAttempt(draft: VoiceDraft, phase: Phase, startedAt: string, data: TraceData, result: { outcome: MatchDiagnostic['outcome']; fallback?: { provider: string; model: string }; transcript?: string; error?: { code: string; message: string } }) {
+    try {
+      const existing = (await repository.listDiagnostics(draft.matchId)).filter(row => row.draftId === draft.id && row.phase === phase).length;
+      const text = (value: string | undefined): DiagnosticText | null => value === undefined ? null : boundText(value);
+      const row: MatchDiagnostic = {
+        id: ids.next(), matchId: draft.matchId, setId: draft.setId, draftId: draft.id, phase, attempt: existing + 1,
+        provider: data.provider ?? result.fallback?.provider ?? 'unknown', model: data.model ?? result.fallback?.model ?? 'unknown',
+        startedAt, finishedAt: clock.now(), outcome: result.outcome,
+        transcript: text(result.transcript), request: text(data.request), response: text(data.response),
+        error: result.error ? { ...result.error, ...(data.http ? { status: data.http.status, body: boundText(data.http.body, DIAGNOSTIC_BODY_LIMIT) } : {}) } : null,
+      };
+      await repository.saveDiagnostic(row);
+    } catch { console.warn('Diagnostics could not be recorded.'); }
+  }
   async function process(draft: VoiceDraft, phase: Phase, signal: AbortSignal) {
     const bundle = await applicable(draft);
     if (!isOnline()) {
+      await recordAttempt(draft, phase, clock.now(), {}, { outcome: 'offline', error: { code: 'offline', message: messages.offline } });
       const waiting: VoiceDraft = { ...draft, state: 'waiting-retry', error: { code: 'offline', message: messages.offline, phase } };
       return save(waiting);
     }
     let current = await save({ ...draft, state: 'processing', error: null });
-    async function providerFailure(error: unknown, failedPhase: Phase) {
+    async function providerFailure(error: unknown, failedPhase: Phase, startedAt: string, data: TraceData, sent?: string) {
       let code: keyof typeof messages = 'network';
       try {
         const candidate = (error as { code?: unknown })?.code;
         if (typeof candidate === 'string' && Object.hasOwn(messages, candidate) && candidate !== 'offline') code = candidate as keyof typeof messages;
         else if (signal.aborted || (error instanceof Error && error.name === 'AbortError')) code = 'cancelled';
       } catch { /* Do not expose untrusted errors. */ }
+      await recordAttempt(current, failedPhase, startedAt, data, { outcome: code === 'cancelled' || code === 'timeout' ? code : 'error', ...(sent === undefined ? {} : { transcript: sent }), error: { code, message: messages[code] } });
       return save({ ...current, state: 'waiting-retry', error: { code, message: messages[code], phase: failedPhase } });
     }
     if (phase === 'transcription') {
       let transcript;
+      const startedAt = clock.now(); const { trace, data } = createTrace();
       try {
         if (!current.recording || !current.mimeType) throw new Error('Missing audio');
         const input = { audio: current.recording, mimeType: current.mimeType };
-        transcript = await bounded(signal, inner => transcriber.transcribe(input, inner));
+        transcript = await bounded(signal, inner => transcriber.transcribe(input, inner, trace));
         if (!transcript || typeof transcript.text !== 'string' || !transcript.text.trim() || typeof transcript.provider !== 'string' || typeof transcript.model !== 'string') throw { code: 'invalid-response' };
-      } catch (error) { return providerFailure(error, 'transcription'); }
+      } catch (error) { return providerFailure(error, 'transcription', startedAt, data); }
+      await recordAttempt(current, 'transcription', startedAt, data, { outcome: 'success', fallback: { provider: transcript.provider, model: transcript.model }, transcript: transcript.text });
       current = await save({ ...current, transcripts: [...current.transcripts, { text: transcript.text, provider: transcript.provider, model: transcript.model, timestamp: clock.now() }] });
     }
     let parsed;
+    const startedAt = clock.now(); const { trace, data } = createTrace();
+    const sentTranscript = current.transcripts.at(-1);
     try {
       const transcript = current.transcripts.at(-1);
       if (!transcript) throw { code: 'invalid-response' };
-      const response = await bounded(signal, inner => parser.parse({ transcript: transcript.text, context: parserContext(bundle, current.setId), ...(current.parsedDraft ? { existingDraft: current.parsedDraft } : {}) }, inner));
+      const response = await bounded(signal, inner => parser.parse({ transcript: transcript.text, context: parserContext(bundle, current.setId), ...(current.parsedDraft ? { existingDraft: current.parsedDraft } : {}) }, inner, trace));
       const validated = draftSchema.safeParse(response);
       if (!validated.success) throw { code: 'invalid-response' };
       parsed = validated.data;
-    } catch (error) { return providerFailure(error, 'parser'); }
+    } catch (error) { return providerFailure(error, 'parser', startedAt, data, sentTranscript?.text); }
+    await recordAttempt(current, 'parser', startedAt, data, { outcome: 'success', fallback: sentTranscript ? { provider: sentTranscript.provider, model: sentTranscript.model } : undefined, transcript: sentTranscript?.text });
     return save({ ...current, parsedDraft: parsed, state: 'ready', error: null });
   }
   function persistDraftFromAudio(input: AudioInput & { matchId: string; setId: string }) {

@@ -452,3 +452,108 @@ describe('parser context projection', () => {
     expect(JSON.stringify(request)).not.toContain('Alex');
   });
 });
+
+describe('draft diagnostics', () => {
+  const abortable = (signal: AbortSignal) => new Promise<never>((_, reject) => signal.addEventListener('abort', () => reject(new Error('aborted'))));
+  async function recorded(ctx: Awaited<ReturnType<typeof setup>>) {
+    return ctx.service.persistDraftFromAudio({ matchId: ctx.match.match.id, setId: ctx.match.sets[0].id, audio: new Blob(['audio']), mimeType: 'audio/mp4' });
+  }
+  const rows = (ctx: Awaited<ReturnType<typeof setup>>) => ctx.repository.listDiagnostics(ctx.match.match.id);
+  const live = () => new AbortController().signal;
+  function tracing(ctx: Awaited<ReturnType<typeof setup>>) {
+    ctx.transcriber.transcribe.mockImplementation(async (_i, _s, trace) => { trace?.target('openai', 'whisper'); trace?.response('{"raw":1}'); return { text: 'won', provider: 'test', model: 'model' }; });
+    ctx.parser.parse.mockImplementation(async (_r, _s, trace) => { trace?.target('anthropic', 'claude'); trace?.request('REQ'); trace?.response('{"raw":2}'); return ctx.parsed; });
+  }
+  it('writes one transcription and one parser row on success', async () => {
+    const ctx = await setup(); tracing(ctx); const draft = await recorded(ctx);
+    expect((await ctx.service.retryDraft(draft.id, live())).state).toBe('ready');
+    const list = await rows(ctx); expect(list).toHaveLength(2);
+    const [t, p] = [list.find(r => r.phase === 'transcription')!, list.find(r => r.phase === 'parser')!];
+    expect(t).toMatchObject({ attempt: 1, outcome: 'success', provider: 'openai', model: 'whisper', draftId: draft.id, error: null });
+    expect(t.transcript?.value).toBe('won'); expect(t.response?.value).toBe('{"raw":1}');
+    expect(p).toMatchObject({ attempt: 1, outcome: 'success', provider: 'anthropic', model: 'claude' });
+    expect(p.transcript?.value).toBe('won'); expect(p.request?.value).toBe('REQ'); expect(p.response?.value).toBe('{"raw":2}');
+  });
+  it('falls back to transcript provider/model, then unknown, for trace-less fakes', async () => {
+    const ctx = await setup(); const draft = await recorded(ctx);
+    await ctx.service.retryDraft(draft.id, live());
+    const list = await rows(ctx);
+    expect(list.find(r => r.phase === 'transcription')).toMatchObject({ provider: 'test', model: 'model' });
+    expect(list.find(r => r.phase === 'parser')).toMatchObject({ provider: 'test', model: 'model' });
+    const ctx2 = await setup(); ctx2.transcriber.transcribe.mockRejectedValueOnce(new Error('x')); const d2 = await recorded(ctx2);
+    await ctx2.service.retryDraft(d2.id, live());
+    expect(await rows(ctx2)).toMatchObject([{ provider: 'unknown', model: 'unknown', outcome: 'error', error: { code: 'network' } }]);
+  });
+  it('records a failed attempt with HTTP details, then a successful retry with attempt 2', async () => {
+    const ctx = await setup(); const draft = await recorded(ctx);
+    ctx.transcriber.transcribe.mockImplementationOnce(async (_i, _s, trace) => { trace?.target('openai', 'whisper'); trace?.httpError(500, 'boom'); throw { code: 'network' }; });
+    expect((await ctx.service.retryDraft(draft.id, live())).state).toBe('waiting-retry');
+    expect((await ctx.service.retryDraft(draft.id, live())).state).toBe('ready');
+    const t = (await rows(ctx)).filter(r => r.phase === 'transcription');
+    expect(t.map(r => [r.attempt, r.outcome])).toEqual([[1, 'error'], [2, 'success']]);
+    expect(t[0].error).toMatchObject({ code: 'network', message: 'Provider network request failed.', status: 500, body: { value: 'boom' } });
+  });
+  it('writes exactly one timeout row and none when the hung provider settles later', async () => {
+    const ctx = await setup(); const draft = await recorded(ctx);
+    let release!: () => void;
+    ctx.transcriber.transcribe.mockImplementationOnce((_i, _s, trace) => new Promise(resolve => { release = () => { trace?.response('late'); resolve({ text: 'won', provider: 'p', model: 'm' }); }; }));
+    const promise = ctx.service.retryDraft(draft.id, live());
+    await vi.waitFor(() => expect(ctx.scheduler.timers).toHaveLength(1)); ctx.scheduler.timers[0].fire();
+    expect((await promise).error?.code).toBe('timeout');
+    release(); await new Promise(resolve => setTimeout(resolve, 10));
+    expect(await rows(ctx)).toMatchObject([{ outcome: 'timeout', error: { code: 'timeout' } }]);
+  });
+  it('writes a cancelled row on abort', async () => {
+    const ctx = await setup(); const draft = await recorded(ctx);
+    ctx.transcriber.transcribe.mockImplementationOnce((_i, signal) => abortable(signal));
+    const controller = new AbortController(); const promise = ctx.service.retryDraft(draft.id, controller.signal);
+    await vi.waitFor(() => expect(ctx.scheduler.timers).toHaveLength(1)); controller.abort(); await promise;
+    expect(await rows(ctx)).toMatchObject([{ outcome: 'cancelled', error: { code: 'cancelled' } }]);
+  });
+  it('writes one offline row and calls no provider when offline', async () => {
+    const ctx = await setup(); ctx.isOnline.mockReturnValue(false); const draft = await recorded(ctx);
+    expect((await ctx.service.retryDraft(draft.id, live())).error?.code).toBe('offline');
+    expect(await rows(ctx)).toMatchObject([{ outcome: 'offline', phase: 'transcription', error: { code: 'offline' } }]);
+    expect(ctx.transcriber.transcribe).not.toHaveBeenCalled();
+  });
+  it('keeps rows after confirm and discard', async () => {
+    const ctx = await setup(); const draft = await recorded(ctx);
+    await ctx.service.retryDraft(draft.id, live()); await ctx.service.confirmDraft(draft.id);
+    expect(await rows(ctx)).toHaveLength(2);
+    const other = await recorded(ctx); await ctx.service.retryDraft(other.id, live()); await ctx.service.discardDraft(other.id);
+    expect(await rows(ctx)).toHaveLength(4);
+  });
+  it('records an invalid parser shape as invalid-response with the response kept', async () => {
+    const ctx = await setup(); const draft = await recorded(ctx);
+    ctx.parser.parse.mockImplementationOnce(async (_r, _s, trace) => { trace?.response('{"bad":true}'); return { bad: true } as never; });
+    expect((await ctx.service.retryDraft(draft.id, live())).error?.code).toBe('invalid-response');
+    const p = (await rows(ctx)).find(r => r.phase === 'parser')!;
+    expect(p).toMatchObject({ outcome: 'error', error: { code: 'invalid-response' } }); expect(p.response?.value).toBe('{"bad":true}');
+  });
+  it('never lets a failing diagnostics write change the draft result', async () => {
+    const ctx = await setup(); const draft = await recorded(ctx);
+    vi.spyOn(ctx.repository, 'saveDiagnostic').mockRejectedValue(new Error('SENTINEL_FAKE_KEY'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect((await ctx.service.retryDraft(draft.id, live())).state).toBe('ready');
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('SENTINEL');
+    const ctx2 = await setup(); const d2 = await recorded(ctx2);
+    vi.spyOn(ctx2.repository, 'saveDiagnostic').mockRejectedValue(new Error('nope'));
+    ctx2.transcriber.transcribe.mockRejectedValueOnce({ code: 'auth' });
+    const saved = await ctx2.service.retryDraft(d2.id, live());
+    expect(saved.state).toBe('waiting-retry'); expect(saved.error).toEqual({ code: 'auth', message: 'Provider authentication failed.', phase: 'transcription' });
+    warn.mockRestore();
+  });
+  it('appends rows with incremented attempt on refine', async () => {
+    const ctx = await setup(); const draft = await recorded(ctx);
+    await ctx.service.retryDraft(draft.id, live()); await ctx.service.refineDraftWithAudio(draft.id, { audio: new Blob(['b']), mimeType: 'audio/mp4' }, live());
+    const list = await rows(ctx);
+    expect(list.filter(r => r.phase === 'transcription').map(r => r.attempt)).toEqual([1, 2]);
+    expect(list.filter(r => r.phase === 'parser').map(r => r.attempt)).toEqual([1, 2]);
+  });
+  it('keeps a sentinel secret out of every row', async () => {
+    const ctx = await setup(); const draft = await recorded(ctx);
+    ctx.transcriber.transcribe.mockRejectedValueOnce(new Error('SENTINEL_FAKE_KEY'));
+    await ctx.service.retryDraft(draft.id, live());
+    expect(JSON.stringify(await rows(ctx))).not.toContain('SENTINEL_FAKE_KEY');
+  });
+});
