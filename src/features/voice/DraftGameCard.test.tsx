@@ -169,3 +169,11 @@ it('clears an invalid service value before switching server and submitting', () 
   fireEvent.click(screen.getByRole('button', { name: 'Save game 1' }));
   expect(update).toHaveBeenCalledWith(0, expect.objectContaining({ server: 'opponent', doubleFaults: null }));
 });
+
+it('treats a draft game lacking the new keys as unknown with details collapsed', () => {
+  const legacy: Record<string, unknown> = { ...plain }; delete legacy.unforcedErrors; delete legacy.comments;
+  render(<DraftGameCard game={legacy as unknown as DraftGame} index={0} onUpdate={vi.fn()} />);
+  expect(screen.getByLabelText('Unforced errors')).toHaveValue('');
+  expect(screen.queryByText('undefined')).not.toBeInTheDocument();
+  expect(details()).not.toHaveAttribute('open');
+});

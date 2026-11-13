@@ -8,9 +8,9 @@ const COUNT_KEYS: readonly CountKey[] = ['unforcedErrors', 'doubleFaults', 'fail
 type Fields = Record<CountKey, string>;
 
 function fieldsFor(game: DraftGame): Fields {
-  return Object.fromEntries(COUNT_KEYS.map(key => [key, game[key] === null ? '' : String(game[key])])) as Fields;
+  return Object.fromEntries(COUNT_KEYS.map(key => [key, game[key] == null ? '' : String(game[key])])) as Fields;
 }
-const hasDetails = (game: DraftGame) => detailMetrics.some(([key]) => game[key] !== null);
+const hasDetails = (game: DraftGame) => detailMetrics.some(([key]) => game[key] != null);
 function invalid(value: string) {
   return value !== '' && (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)));
 }

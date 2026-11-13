@@ -64,6 +64,20 @@ describe('exportBackup', () => {
     for (const forbidden of ['apiKey', 'sk-', 'endpoint', 'draft', 'recording', 'transcript', 'secret audio', 'audio/mp4', 'serviceWorker', 'provider', 'dataVersion']) expect(text).not.toContain(forbidden);
     expect(text).toContain('Windy; served well');
   });
+  it('normalizes unmigrated games lacking the new keys so the export re-imports cleanly', async () => {
+    const name = `backup-unmigrated-${crypto.randomUUID()}`;
+    const db = new TennisDatabase(name); await db.open();
+    const item = ownBundle('unmigrated', 'completed');
+    const legacyGame: Record<string, unknown> = { ...item.games[0] }; delete legacyGame.unforcedErrors; delete legacyGame.comments;
+    await db.opponents.put(item.opponent); await db.matches.put(item.match); await db.sets.bulkPut(item.sets); await db.games.bulkPut([legacyGame as never]);
+    await db.metadata.put({ key: 'dataVersion', value: 'not-a-number' as never });
+    db.close();
+    const repo = await openDatabase(name); repos.push(repo);
+    const preview = ok(previewImport(serializeBackup(await exportBackup(repo, clock))));
+    expect(preview.rejected).toEqual([]);
+    expect(preview.counts.games).toMatchObject({ total: 1, accepted: 1, rejected: 0 });
+    expect(preview.records.games[0]).toMatchObject({ unforcedErrors: null, comments: null });
+  });
   it('exports tennis records while an unreadable data version keeps the repository in read-only recovery', async () => {
     const name = `backup-invalid-version-${crypto.randomUUID()}`;
     const db = new TennisDatabase(name); await db.open();

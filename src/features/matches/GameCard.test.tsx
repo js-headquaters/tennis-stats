@@ -45,3 +45,9 @@ it('renders the game comment when present and omits it otherwise', () => {
   rerender(<GameCard game={base} />);
   expect(screen.queryByText('Strong second serve')).not.toBeInTheDocument();
 });
+
+it('labels derived totals for unmigrated games lacking the new keys', () => {
+  const legacy: Record<string, unknown> = { ...base }; delete legacy.unforcedErrors; delete legacy.comments;
+  render(<GameCard game={{ ...legacy, netErrors: 1, longErrors: 2 } as unknown as Game} />);
+  expect(within(screen.getByTestId('metric-unforcedErrors')).getByText('Derived from details')).toBeInTheDocument();
+});

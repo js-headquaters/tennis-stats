@@ -173,8 +173,9 @@ export function createDraftService({ repository, transcriber, parser, clock, ids
       await save({ ...draft, state: 'confirming', error: null });
       const found = await applicable(draft);
       if (found.sets.find(s => s.status === 'active')?.id !== draft.setId) throw new DraftNotApplicableError();
-      if (!draftSchema.safeParse(draft.parsedDraft).success) throw new Error('Invalid draft games');
-      const prepared = prepareGames(found, draft.parsedDraft.games, { clock, ids });
+      const parsed = draftSchema.safeParse(draft.parsedDraft);
+      if (!parsed.success) throw new Error('Invalid draft games');
+      const prepared = prepareGames(found, parsed.data.games, { clock, ids });
       const result = await storage(() => repository.confirmDraft(id, draft.confirmationId, prepared, clock.now(), found));
       const durable = await confirmed(id, draft);
       if (!durable) throw new DraftStorageError();

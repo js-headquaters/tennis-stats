@@ -3,9 +3,8 @@ import { Pencil, Trash2 } from 'lucide-react';
 import { effectiveUnforcedErrors } from '../../domain/statistics';
 import IconLabel from '../../components/IconLabel';
 
-export const metrics = [ ['netErrors', 'Net errors'], ['wideErrors', 'Wide errors'], ['longErrors', 'Long errors'], ['doubleFaults', 'Double faults'], ['failedReturns', 'Failed returns'] ] as const;
-/** Tie-breaks record every metric except failed returns. */
-export const tieBreakMetrics = metrics.slice(0, 4) as ReadonlyArray<readonly [keyof Pick<TieBreak, 'netErrors' | 'wideErrors' | 'longErrors' | 'doubleFaults'>, string]>;
+/** Tie-breaks record net, wide and long errors and double faults (no failed returns). */
+export const tieBreakMetrics = [ ['netErrors', 'Net errors'], ['wideErrors', 'Wide errors'], ['longErrors', 'Long errors'], ['doubleFaults', 'Double faults'] ] as const satisfies ReadonlyArray<readonly [keyof Pick<TieBreak, 'netErrors' | 'wideErrors' | 'longErrors' | 'doubleFaults'>, string]>;
 
 /** Optional per-direction detail counts, shown inside the collapsed details of a game card and form. */
 export const detailMetrics = [ ['netErrors', 'Net errors'], ['wideErrors', 'Wide errors'], ['longErrors', 'Long errors'] ] as const;
@@ -15,7 +14,7 @@ export function Count({ value }: { value: number | null }) { return value === nu
 
 export default function GameCard({ game, onEdit, onDelete, disabled }: { game: Game; onEdit?: () => void; onDelete?: () => void; disabled?: boolean }) {
   const unforced = effectiveUnforcedErrors(game);
-  const derived = game.unforcedErrors === null && unforced !== null;
+  const derived = game.unforcedErrors == null && unforced !== null;
   const serveKey = game.server === 'player' ? 'doubleFaults' : 'failedReturns';
   const serveLabel = game.server === 'player' ? 'Double faults' : 'Receive errors';
   return <article className="game-card" aria-label={`Game ${game.ordinal}`}>

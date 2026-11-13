@@ -54,6 +54,10 @@ function populatedSnapshot() { return buildSnapshot({ bundles: populatedBundles(
 function records(source: Pick<StoredSnapshot, typeof ENTITIES[number]> | TennisRecords) {
   return Object.fromEntries(ENTITIES.map(entity => [entity, sortById(source[entity] as Array<{ id: string }>)])) as unknown as TennisRecords;
 }
+/** Unmigrated games export with the new keys normalized to null (nothing else is invented). */
+function withNormalizedGames(source: TennisRecords): TennisRecords {
+  return { ...source, games: source.games.map(g => ({ ...g, unforcedErrors: g.unforcedErrors ?? null, comments: g.comments ?? null })) };
+}
 function counts(source: TennisRecords) { return Object.fromEntries(ENTITIES.map(entity => [entity, source[entity].length])); }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -454,7 +458,7 @@ test.describe('journey 12: upgrading a previous database version', () => {
       await expect(page).toHaveURL(/#\/settings$/);
       await expect(page.getByText(/^On this device: 2 matches, 1 opponent, 2 sets, 3 games, 1 tie-break/)).toBeVisible();
       const file = await exportFromUi(page);
-      expect(records((JSON.parse(file.text) as { data: TennisRecords }).data)).toEqual(records(tennisStores as unknown as TennisRecords));
+      expect(records((JSON.parse(file.text) as { data: TennisRecords }).data)).toEqual(withNormalizedGames(records(tennisStores as unknown as TennisRecords)));
       // Importing and clearing are disabled with an explanation; AI settings (local storage) stay usable.
       await expect(page.getByLabel('Backup file to import')).toBeDisabled();
       await expect(page.getByLabel('Type DELETE to confirm')).toBeDisabled();
