@@ -1,3 +1,4 @@
+import type { AttemptTrace } from '../../application/ports';
 export type SafeProviderErrorCode = 'auth' | 'rate' | 'network' | 'config' | 'invalid-response' | 'cancelled';
 const messages: Record<SafeProviderErrorCode, string> = { auth: 'Provider authentication failed.', rate: 'Provider rate limit reached.', network: 'Provider network request failed.', config: 'Provider configuration is invalid.', 'invalid-response': 'Provider returned an invalid response.', cancelled: 'Provider request was cancelled.' };
 export class SafeProviderError extends Error {
@@ -10,10 +11,24 @@ export function validateConfig(config: { apiKey: string; model: string; endpoint
   if (!config.apiKey.trim() || !config.model.trim()) throw new SafeProviderError('config');
   if (config.endpoint) { try { const url = new URL(config.endpoint); if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || config.endpoint.includes('?') || config.endpoint.includes('#')) throw new Error(); } catch { throw new SafeProviderError('config'); } }
 }
-export async function requestJson(fetcher: typeof fetch, url: string, init: RequestInit, signal: AbortSignal): Promise<unknown> {
+/** Wraps a trace so that a throwing trace method can never change adapter behaviour. */
+export function safeTrace(trace?: AttemptTrace): AttemptTrace | undefined {
+  if (!trace) return undefined;
+  const guard = <A extends unknown[]>(call: (...args: A) => void) => (...args: A) => { try { call(...args); } catch { /* diagnostics must never affect the provider call */ } };
+  return { target: guard((p: string, m: string) => trace.target(p, m)), request: guard((t: string) => trace.request(t)), response: guard((t: string) => trace.response(t)), httpError: guard((s: number, b: string) => trace.httpError(s, b)) };
+}
+export async function requestJson(fetcher: typeof fetch, url: string, init: RequestInit, signal: AbortSignal, trace?: AttemptTrace): Promise<unknown> {
+  const t = safeTrace(trace);
   try {
     const response = await fetcher(url, { ...init, signal, redirect: 'error' });
-    if (!response.ok) throw new SafeProviderError(response.status === 401 || response.status === 403 ? 'auth' : response.status === 429 ? 'rate' : 'network');
-    try { return await response.json(); } catch { throw new SafeProviderError('invalid-response'); }
+    if (!response.ok) {
+      let body = ''; try { body = await response.text(); } catch { body = ''; }
+      t?.httpError(response.status, body);
+      throw new SafeProviderError(response.status === 401 || response.status === 403 ? 'auth' : response.status === 429 ? 'rate' : 'network');
+    }
+    let text: string;
+    try { text = await response.text(); } catch { throw new SafeProviderError('invalid-response'); }
+    t?.response(text);
+    try { return JSON.parse(text); } catch { throw new SafeProviderError('invalid-response'); }
   } catch (error) { if (signal.aborted || (error instanceof Error && error.name === 'AbortError')) throw new SafeProviderError('cancelled'); throw redactProviderError(error); }
 }

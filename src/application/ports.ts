@@ -6,14 +6,23 @@ export interface TranscriptionSettings { provider: 'openai'; model: string; endp
 export interface ParserSettings { provider: 'openai' | 'anthropic'; model: string; endpoint: string; apiKey: string }
 export interface AiSettingsStore { getTranscription(): TranscriptionSettings; saveTranscription(settings: TranscriptionSettings): void; getParser(): ParserSettings; saveParser(settings: ParserSettings): void; clear(kind: AiKind): void }
 export interface Transcript { text: string; provider: string; model: string }
-export interface TranscriptionProvider { transcribe(request: { audio: Blob; mimeType: string; language?: string; context?: string }, signal: AbortSignal): Promise<Transcript> }
+/** Receives raw attempt data for diagnostics. Never receives API keys, headers or request init. */
+export interface AttemptTrace {
+  target(provider: string, model: string): void;
+  /** Parser: exactly the user message sent (requestPayload output). */
+  request(text: string): void;
+  /** Raw response body text, success or invalid. */
+  response(text: string): void;
+  httpError(status: number, body: string): void;
+}
+export interface TranscriptionProvider { transcribe(request: { audio: Blob; mimeType: string; language?: string; context?: string }, signal: AbortSignal, trace?: AttemptTrace): Promise<Transcript> }
 /**
  * The minimal match projection sent to the parser provider: no opponent, comments, dates, ids or confirmed-game history.
  * No ids are kept: the parser only returns draft games, and the app attaches them to the set itself.
  */
 export interface ParserMatchContext { format: MatchFormat; setKind: 'standard' | 'decidingSuperTiebreak'; playerGames: number; opponentGames: number; gamesRecorded: number; expectedNextServer: Server }
 export interface ParserRequest { transcript: string; context?: ParserMatchContext; existingDraft?: ParsedDraft }
-export interface StatisticsParser { parse(request: ParserRequest, signal: AbortSignal): Promise<ParsedDraft> }
+export interface StatisticsParser { parse(request: ParserRequest, signal: AbortSignal, trace?: AttemptTrace): Promise<ParsedDraft> }
 
 export interface Clock { now(): string }
 export interface IdGenerator { next(): string }

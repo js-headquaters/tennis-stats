@@ -96,3 +96,62 @@ it('sends only the minimal parser context to both providers, never opponent, com
     for (const sentinel of ['SENTINEL-OPPONENT-NAME', 'SENTINEL-COMMENT', 'SENTINEL-GAME-ID', '987654']) expect(raw).not.toContain(sentinel);
   }
 });
+
+import type { AttemptTrace } from '../../application/ports';
+import { requestPayload } from './parserCommon';
+function recorder() {
+  const calls: Array<[string, ...unknown[]]> = [];
+  const trace: AttemptTrace = { target: (...a) => { calls.push(['target', ...a]); }, request: (...a) => { calls.push(['request', ...a]); }, response: (...a) => { calls.push(['response', ...a]); }, httpError: (...a) => { calls.push(['httpError', ...a]); } };
+  return { calls, trace };
+}
+const audio = { audio: new Blob(['a']), mimeType: 'audio/webm' };
+const parseBodies = { openai: JSON.stringify({ choices: [{ message: { content: JSON.stringify(draft) } }] }), anthropic: JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(draft) }] }) };
+const makeParser = (provider: 'openai' | 'anthropic', fetcher: typeof fetch) => provider === 'openai' ? createOpenAiParser(config, fetcher) : createAnthropicParser({ ...config, provider }, fetcher);
+it('traces transcription success with target and raw response', async () => {
+  const { calls, trace } = recorder(); const raw = JSON.stringify({ text: 'hello' });
+  await createOpenAiTranscription(config, vi.fn().mockResolvedValue(new Response(raw))).transcribe(audio, new AbortController().signal, trace);
+  expect(calls).toEqual([['target', 'openai', 'test'], ['response', raw]]);
+  expect(JSON.stringify(calls)).not.toContain(key);
+});
+it('traces HTTP errors and still rejects with the safe code', async () => {
+  const { calls, trace } = recorder();
+  await expect(createOpenAiTranscription(config, vi.fn().mockResolvedValue(new Response('{"error":"slow down"}', { status: 429 }))).transcribe(audio, new AbortController().signal, trace)).rejects.toMatchObject({ code: 'rate' });
+  expect(calls).toContainEqual(['httpError', 429, '{"error":"slow down"}']);
+  expect(JSON.stringify(calls)).not.toContain(key);
+});
+it('traces a non-JSON success body and rejects invalid-response', async () => {
+  const { calls, trace } = recorder();
+  await expect(createOpenAiTranscription(config, vi.fn().mockResolvedValue(new Response('not json'))).transcribe(audio, new AbortController().signal, trace)).rejects.toMatchObject({ code: 'invalid-response' });
+  expect(calls).toContainEqual(['response', 'not json']);
+  expect(JSON.stringify(calls)).not.toContain(key);
+});
+it('traces parser request and raw response for both providers', async () => {
+  for (const provider of ['openai', 'anthropic'] as const) {
+    const { calls, trace } = recorder(); const req = { transcript: 'test' };
+    await makeParser(provider, vi.fn().mockResolvedValue(new Response(parseBodies[provider]))).parse(req, new AbortController().signal, trace);
+    expect(calls).toEqual([['target', provider, 'test'], ['request', requestPayload(req)], ['response', parseBodies[provider]]]);
+    expect(JSON.stringify(calls)).not.toContain(key);
+  }
+});
+it('never passes the key to the trace on thrown errors or invalid bodies', async () => {
+  for (const provider of ['openai', 'anthropic'] as const) {
+    for (const fetcher of [vi.fn().mockRejectedValue(new Error(key)), vi.fn().mockResolvedValue(new Response('server error', { status: 500 })), vi.fn().mockResolvedValue(new Response(JSON.stringify({ nope: 1 })))]) {
+      const { calls, trace } = recorder();
+      await makeParser(provider, fetcher).parse({ transcript: 't' }, new AbortController().signal, trace).catch(() => undefined);
+      expect(JSON.stringify(calls)).not.toContain(key);
+    }
+  }
+  const { calls, trace } = recorder();
+  await createOpenAiTranscription(config, vi.fn().mockRejectedValue(new Error(key))).transcribe(audio, new AbortController().signal, trace).catch(() => undefined);
+  expect(JSON.stringify(calls)).not.toContain(key);
+});
+it('a throwing trace does not change results', async () => {
+  const boom = (): never => { throw new Error('trace broke'); };
+  const trace: AttemptTrace = { target: boom, request: boom, response: boom, httpError: boom };
+  const signal = new AbortController().signal;
+  expect(await createOpenAiTranscription(config, vi.fn().mockResolvedValue(new Response(JSON.stringify({ text: 'hi' })))).transcribe(audio, signal, trace)).toMatchObject({ text: 'hi' });
+  for (const provider of ['openai', 'anthropic'] as const) expect(await makeParser(provider, vi.fn().mockResolvedValue(new Response(parseBodies[provider]))).parse({ transcript: 't' }, signal, trace)).toEqual(draft);
+  await expect(createOpenAiTranscription(config, vi.fn().mockResolvedValue(new Response('x', { status: 429 }))).transcribe(audio, signal, trace)).rejects.toMatchObject({ code: 'rate' });
+  await expect(createOpenAiTranscription(config, vi.fn().mockResolvedValue(new Response('not json'))).transcribe(audio, signal, trace)).rejects.toMatchObject({ code: 'invalid-response' });
+  await expect(createOpenAiTranscription({ ...config, apiKey: '' }, vi.fn()).transcribe(audio, signal, trace)).rejects.toMatchObject({ code: 'config' });
+});
