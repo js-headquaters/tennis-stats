@@ -340,6 +340,7 @@ test.describe('iOS/WebKit microphone fallback to manual entry', () => {
       await expect(page).toHaveURL(new RegExp(`${LIVE}$`));
       await page.getByRole('button', { name: 'Manual game entry' }).click();
       const form = page.getByRole('form', { name: 'Manual game entry' });
+      await form.getByText('Add details').click();
       await form.getByLabel('Net errors').fill('1');
       await form.getByRole('button', { name: 'Add game' }).click();
       await expect(page.getByText('Set 1: 1–0 (active)')).toBeVisible();

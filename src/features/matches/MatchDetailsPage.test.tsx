@@ -90,10 +90,11 @@ it('shows per-match averages with sample sizes, distinguishing unknown from expl
   show(await seeded(completed()));
   const averages = await screen.findByRole('region', { name: 'Match averages' });
   const row = (label: string) => within(averages).getByRole('row', { name: new RegExp(`^${label}`) });
-  expect(row('Net errors')).toHaveTextContent('1'); expect(row('Net errors')).toHaveTextContent('2 games');
-  expect(row('Long errors')).toHaveTextContent('0'); expect(row('Long errors')).toHaveTextContent('1 game');
-  expect(within(row('Wide errors')).getByLabelText('unknown')).toHaveTextContent('—'); expect(row('Wide errors')).toHaveTextContent('0 games');
-  expect(row('Double faults')).toHaveTextContent('0 service games');
+  expect(within(averages).getAllByRole('row').slice(1)).toHaveLength(3);
+  expect(row('Unforced errors')).toHaveTextContent('1'); expect(row('Unforced errors')).toHaveTextContent('2 games');
+  expect(row('Double faults')).toHaveTextContent('0 service games'); expect(within(row('Double faults')).getByLabelText('unknown')).toHaveTextContent('—');
+  expect(within(row('Receive errors')).getByLabelText('unknown')).toHaveTextContent('—'); expect(row('Receive errors')).toHaveTextContent('0 return games');
+  for (const label of ['Net errors', 'Wide errors', 'Long errors', 'Failed returns']) expect(within(averages).queryByRole('row', { name: new RegExp(`^${label}`) })).not.toBeInTheDocument();
   expect(averages).not.toHaveTextContent(/total/i);
 });
 

@@ -105,3 +105,8 @@
 .live-match-error button, .live-match-error a { min-height: 44px; min-width: 44px; padding: .5rem .75rem; font: inherit; display: inline-flex; align-items: center; justify-content: center; color: var(--text); }
 .route-fallback { padding: 1.25rem; }
 .route-fallback-links a { min-height: 44px; min-width: 44px; padding: .5rem .75rem; display: inline-flex; align-items: center; color: var(--text); background: white; border: 1px solid var(--border); border-radius: .5rem; font-weight: 700; }
+.live-match summary, .match-details summary { min-height: 44px; min-width: 44px; display: flex; align-items: center; cursor: pointer; font-weight: 700; }
+.live-match summary:focus-visible, .match-details summary:focus-visible { outline: 3px solid var(--text); outline-offset: 2px; }
+.game-details, .game-form-details { margin: .5rem 0; }
+.game-comment { margin: .5rem 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.metric small { font-size: .75rem; }

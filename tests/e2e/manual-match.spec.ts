@@ -22,10 +22,13 @@ async function seedLive(page: Page, spec: MatchSpec) {
 }
 
 /** Fills the manual/edit game form. Metric values: number → typed, '' → cleared (unknown), undefined → untouched. */
-async function fillGame(form: Locator, values: { result?: 'Won' | 'Lost'; server?: 'Player served' | 'Opponent served'; metrics?: Partial<Record<'Net errors' | 'Wide errors' | 'Long errors' | 'Double faults' | 'Failed returns', number | ''>> }) {
+async function fillGame(form: Locator, values: { result?: 'Won' | 'Lost'; server?: 'Player served' | 'Opponent served'; metrics?: Partial<Record<'Net errors' | 'Wide errors' | 'Long errors' | 'Double faults' | 'Receive errors' | 'Unforced errors', number | ''>> }) {
   if (values.result) await form.getByLabel('Result').selectOption({ label: values.result });
   if (values.server) await form.getByLabel('Server').selectOption({ label: values.server });
-  for (const [label, value] of Object.entries(values.metrics ?? {})) await form.getByLabel(label).fill(String(value));
+  for (const [label, value] of Object.entries(values.metrics ?? {})) {
+    if (/^(Net|Wide|Long) errors$/.test(label) && !(await form.locator('details').evaluate(el => (el as HTMLDetailsElement).open))) await form.getByText('Add details').click();
+    await form.getByLabel(label).fill(String(value));
+  }
 }
 
 async function addManualGame(page: Page, values: Parameters<typeof fillGame>[1]) {
@@ -44,7 +47,7 @@ test('@smoke records games manually with inferred servers while AI is unavailabl
   const form = page.getByRole('form', { name: 'Manual game entry' });
   await expect(form.getByLabel('Server')).toHaveValue('opponent'); // inferred from the first server
   // Net errors left blank (unknown); wide errors typed as 0 (a recorded zero).
-  await fillGame(form, { result: 'Lost', metrics: { 'Wide errors': 0, 'Failed returns': 2 } });
+  await fillGame(form, { result: 'Lost', metrics: { 'Wide errors': 0, 'Receive errors': 2 } });
   await form.getByRole('button', { name: 'Add game' }).click();
   await expect(page.getByText('Next server: Player')).toBeVisible();
 
@@ -53,7 +56,7 @@ test('@smoke records games manually with inferred servers while AI is unavailabl
   await expect(page.getByText('Set 1: 1–1 (active)')).toBeVisible();
 
   const game1 = page.getByRole('article', { name: 'Game 1', exact: true });
-  await expect(game1.getByTestId('metric-netErrors').getByLabel('unknown')).toBeVisible();
+  await expect(game1.getByTestId('metric-netErrors')).toHaveText('Net errors—');
   await expect(game1.getByTestId('metric-wideErrors')).toHaveText('Wide errors0');
 
   const stored = await readDatabase(page);
@@ -68,13 +71,15 @@ test('@smoke records games manually with inferred servers while AI is unavailabl
   await expect(page.getByRole('article', { name: 'Game 2', exact: true })).toContainText('Player served');
 });
 
-test('rejects a metric that does not apply to the server without saving anything', async ({ page }) => {
+test('offers only the serve metric that applies to the server and clears the other on switching', async ({ page }) => {
   await seedLive(page, { id: 'm1', opponent: 'Alex Example', format: 'oneSet', firstServer: 'player' });
   await page.getByRole('button', { name: 'Manual game entry' }).click();
   const form = page.getByRole('form', { name: 'Manual game entry' });
-  await fillGame(form, { metrics: { 'Failed returns': 1 } });
-  await form.getByRole('button', { name: 'Add game' }).click();
-  await expect(form.getByRole('alert')).toHaveText('Double faults apply to player service; failed returns apply to opponent service.');
+  await fillGame(form, { metrics: { 'Double faults': 1 } });
+  await expect(form.getByLabel('Receive errors')).toHaveCount(0);
+  await form.getByLabel('Server').selectOption({ label: 'Opponent served' });
+  await expect(form.getByLabel('Double faults')).toHaveCount(0);
+  await expect(form.getByLabel('Receive errors')).toHaveValue('');
   expect((await readDatabase(page)).games).toEqual([]);
 });
 
@@ -207,7 +212,7 @@ test('finishes, reopens from history, reviews an early-game conflict, corrects a
   await expect(page).toHaveURL(/#\/matches\/m1$/);
   await expect(page.getByRole('region', { name: 'Set 1' })).toContainText('Score 6–4 · Won · Set completed');
   const averages = page.getByRole('table', { name: 'Match averages per metric' });
-  await expect(averages.getByRole('row', { name: /Net errors/ })).toContainText('0 games');
+  await expect(averages.getByRole('row', { name: /Unforced errors/ })).toContainText('0 games');
 
   // Statistic correction without conflicts: applied and the averages recalculate.
   const set1 = page.getByRole('region', { name: 'Set 1' });
@@ -216,8 +221,8 @@ test('finishes, reopens from history, reviews an early-game conflict, corrects a
   await fillGame(edit, { metrics: { 'Net errors': 3 } });
   await edit.getByRole('button', { name: 'Save game' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Correction saved.' })).toBeVisible();
-  await expect(averages.getByRole('row', { name: /Net errors/ })).toContainText('3');
-  await expect(averages.getByRole('row', { name: /Net errors/ })).toContainText('1 game');
+  await expect(averages.getByRole('row', { name: /Unforced errors/ })).toContainText('3');
+  await expect(averages.getByRole('row', { name: /Unforced errors/ })).toContainText('1 game');
   stored = await readDatabase(page);
   expect(stored.games.find(g => g.id === bundle.games[1].id)!.netErrors).toBe(3);
   expect(sortById(stored.games.filter(g => g.id !== bundle.games[1].id)), 'other games untouched').toEqual(sortById(bundle.games.filter(g => g.id !== bundle.games[1].id)));

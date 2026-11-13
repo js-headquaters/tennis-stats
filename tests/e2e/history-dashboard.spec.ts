@@ -121,25 +121,27 @@ test('unknown is not averaged as zero, an explicit zero is; a post-match edit re
   await expect(page).toHaveURL(/#\/matches\/z$/);
   const averages = page.getByRole('table', { name: 'Match averages per metric' });
   const row = (name: RegExp) => averages.getByRole('row', { name });
-  await expect(row(/Net errors/)).toContainText('2');
-  await expect(row(/Net errors/)).toContainText('1 game');
-  await expect(row(/Wide errors/).getByRole('cell').first()).toHaveText('0');
-  await expect(row(/Failed returns/).getByRole('img', { name: 'unknown' })).toBeVisible();
+  // Derived from details: game 1 (wide 0) = 0 and game 2 (net 2) = 2 → average 1 over 2 games.
+  await expect(row(/Unforced errors/)).toContainText('1');
+  await expect(row(/Unforced errors/)).toContainText('2 games');
+  await expect(row(/Receive errors/).getByRole('img', { name: 'unknown' })).toBeVisible();
 
   // Correct after completion: game 1 net errors unknown → 0, game 2 → 4; failed returns recorded as 0.
   const set1 = page.getByRole('region', { name: 'Set 1' });
   const edit = page.getByRole('form', { name: 'Edit game' });
   await set1.getByRole('button', { name: 'Edit game 1', exact: true }).click();
+  if (!(await edit.locator('details').evaluate(el => (el as HTMLDetailsElement).open))) await edit.getByText('Add details').click();
   await edit.getByLabel('Net errors').fill('0');
   await edit.getByRole('button', { name: 'Save game' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Correction saved.' })).toBeVisible();
   await set1.getByRole('button', { name: 'Edit game 2', exact: true }).click();
+  if (!(await edit.locator('details').evaluate(el => (el as HTMLDetailsElement).open))) await edit.getByText('Add details').click();
   await edit.getByLabel('Net errors').fill('4');
-  await edit.getByLabel('Failed returns').fill('0');
+  await edit.getByLabel('Receive errors').fill('0');
   await edit.getByRole('button', { name: 'Save game' }).click();
   await expect(edit).toBeHidden();
-  await expect(row(/Net errors/)).toContainText('2 games');
-  await expect(row(/Failed returns/).getByRole('cell').first()).toHaveText('0');
+  await expect(row(/Unforced errors/)).toContainText('2 games');
+  await expect(row(/Receive errors/).getByRole('cell').first()).toHaveText('0');
 
   const stored = await readDatabase(page);
   expect(stored.matches).toMatchObject([{ id: 'z', status: 'completed' }]);
