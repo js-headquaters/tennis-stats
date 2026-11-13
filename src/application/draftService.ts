@@ -1,10 +1,10 @@
-import { z } from 'zod';
 import type { Clock, IdGenerator, ParserMatchContext, StatisticsParser, TennisRepository, TranscriptionProvider } from './ports';
 import type { DraftGame, MatchBundle, VoiceDraft } from '../domain/model';
 import { validateGame } from '../domain/validation';
 import { nextGameServer, prepareGames } from './matchService';
 import { evaluateSet } from '../domain/scoring';
 import { isReadOnlyRecoveryError } from './recovery';
+import { draftGameSchema as gameSchema, parsedDraftSchema as draftSchema } from './draftSchema';
 
 type Phase = 'transcription' | 'parser';
 type Deps = { repository: TennisRepository; transcriber: TranscriptionProvider; parser: StatisticsParser; clock: Clock; ids: IdGenerator; isOnline: () => boolean; requestTimeoutMs?: number; scheduler?: Scheduler };
@@ -14,9 +14,8 @@ const defaultScheduler: Scheduler = { schedule(action, delay) { const id = setTi
 /** Upper bound for a single transcription or parsing request. */
 export const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
 type AudioInput = { audio: Blob; mimeType: string };
-const metric = z.number().int().nonnegative().nullable();
-const gameSchema = z.object({ server: z.enum(['player', 'opponent']), result: z.enum(['won', 'lost']), netErrors: metric, wideErrors: metric, longErrors: metric, doubleFaults: metric, failedReturns: metric, unforcedErrors: metric.default(null), comments: z.string().nullable().default(null) }).strict().refine(g => g.server === 'player' ? g.failedReturns === null : g.doubleFaults === null);
-const draftSchema = z.object({ version: z.literal(2), games: z.array(gameSchema), warnings: z.array(z.string()) }).strict();
+/** The draft game fields a manual review edit may change. */
+const EDITABLE_FIELDS: ReadonlyArray<keyof DraftGame> = ['server', 'result', 'unforcedErrors', 'netErrors', 'wideErrors', 'longErrors', 'doubleFaults', 'failedReturns', 'comments'];
 const messages = { auth: 'Provider authentication failed.', rate: 'Provider rate limit reached.', network: 'Provider network request failed.', config: 'Provider configuration is invalid.', 'invalid-response': 'Provider returned an invalid response.', cancelled: 'Processing cancelled.', timeout: 'Provider request timed out.', offline: 'Waiting for an internet connection.' } as const;
 
 export class DraftStorageError extends Error {
@@ -143,10 +142,12 @@ export function createDraftService({ repository, transcriber, parser, clock, ids
   function updateDraftGame(id: string, index: number, patch: Partial<DraftGame>) {
     return guard(id, async () => {
       const draft = await load(id);
-      if (draft.state !== 'ready' || !draft.parsedDraft || !Number.isInteger(index) || index < 0 || index >= draft.parsedDraft.games.length || !patch || Object.keys(patch).some(key => !['server', 'result', 'netErrors', 'wideErrors', 'longErrors', 'doubleFaults', 'failedReturns'].includes(key))) throw new Error('Invalid draft game edit');
-      const game = { ...draft.parsedDraft.games[index], ...patch };
-      const valid = gameSchema.safeParse(game);
-      if (!valid.success || !validateGame({ ...game, id: draft.id, setId: draft.setId, ordinal: index + 1, score: null, createdAt: draft.createdAt, updatedAt: draft.updatedAt }).ok) throw new Error('Invalid draft game edit');
+      if (draft.state !== 'ready' || !draft.parsedDraft || !Number.isInteger(index) || index < 0 || index >= draft.parsedDraft.games.length || !patch || typeof patch !== 'object' || Object.keys(patch).some(key => !EDITABLE_FIELDS.includes(key as keyof DraftGame))) throw new Error('Invalid draft game edit');
+      // The strict schema trims the comment (blank becomes null) and rejects bad totals or an over-long comment before any write.
+      const valid = gameSchema.safeParse({ ...draft.parsedDraft.games[index], ...patch });
+      if (!valid.success) throw new Error('Invalid draft game edit');
+      const game: DraftGame = valid.data;
+      if (!validateGame({ ...game, id: draft.id, setId: draft.setId, ordinal: index + 1, score: null, createdAt: draft.createdAt, updatedAt: draft.updatedAt }).ok) throw new Error('Invalid draft game edit');
       const games = [...draft.parsedDraft.games]; games[index] = game;
       const next = { ...draft, parsedDraft: { ...draft.parsedDraft, games }, updatedAt: clock.now() };
       await storage(() => repository.saveDraft(next)); return next;

@@ -68,7 +68,7 @@ test('@smoke reviews a mocked batch transcript, corrects it by voice, and commit
   await expect(draftCard(page, 1).getByLabel('Wide errors')).toHaveValue('0');
   await expect(draftCard(page, 1).getByTestId('draft-metric-longErrors').getByLabel('Unknown')).toBeVisible();
   await expect(draftCard(page, 2).getByLabel('Server')).toHaveValue('opponent');
-  await expect(draftCard(page, 2).getByLabel('Failed returns')).toHaveValue('1');
+  await expect(draftCard(page, 2).getByLabel('Receive errors')).toHaveValue('1');
 
   // The providers got the audio, then the transcript with the match context; both carried the configured (fake) key.
   expect(ai.calls.map(call => call.kind)).toEqual(['transcription', 'openai-parser']);
@@ -98,7 +98,7 @@ test('@smoke reviews a mocked batch transcript, corrects it by voice, and commit
   await expect(page.getByText(correction)).toBeVisible();
   await expect(page.getByText(FIRST_TRANSCRIPT), 'the original transcript stays available').toBeVisible();
   await expect(draftCard(page, 3).getByLabel('Result')).toHaveValue('lost');
-  await expect(draftCard(page, 4).getByLabel('Failed returns')).toHaveValue('0');
+  await expect(draftCard(page, 4).getByLabel('Receive errors')).toHaveValue('0');
   expect(ai.calls.map(call => call.kind)).toEqual(['transcription', 'openai-parser', 'transcription', 'openai-parser']);
   const refineBody = JSON.parse(ai.callsOf('openai-parser')[1].body ?? '{}') as unknown;
   expect(JSON.stringify(refineBody), 'the refinement sends the edited draft as context').toContain('existingDraft');

@@ -48,6 +48,23 @@ it('saves zero and null through the service without writing match data', async (
   await waitFor(() => expect(service.updateDraftGame).toHaveBeenCalledWith('d', 0, expect.objectContaining({ netErrors:0, longErrors:null, failedReturns: null })));
   expect(service.confirmDraft).not.toHaveBeenCalled(); expect(repository.close).not.toHaveBeenCalled();
 });
+it('reviews and saves each game comment and total through the service', async () => {
+  const withComments: VoiceDraft = { ...draft, parsedDraft:{ ...draft.parsedDraft!, games:[{ ...draft.parsedDraft!.games[0], unforcedErrors:2, comments:'Stayed calm' }, { server:'opponent', result:'lost', netErrors:null, wideErrors:null, longErrors:null, doubleFaults:null, failedReturns:1, unforcedErrors:3, comments:'Late on the backhand' }] } };
+  const { service } = setup(withComments);
+  const second = await screen.findByRole('form', { name:'Draft game 2' });
+  expect(within(screen.getByRole('form', { name:'Draft game 1' })).getByLabelText('Game comment')).toHaveValue('Stayed calm');
+  expect(within(second).getByLabelText('Game comment')).toHaveValue('Late on the backhand');
+  expect(within(second).getByLabelText('Receive errors')).toHaveValue('1');
+  fireEvent.change(within(second).getByLabelText('Game comment'), { target:{ value:' Rushed the return ' } });
+  fireEvent.change(within(second).getByLabelText('Unforced errors'), { target:{ value:'4' } });
+  fireEvent.click(within(second).getByRole('button', { name:'Save game 2' }));
+  await waitFor(() => expect(service.updateDraftGame).toHaveBeenCalledWith('d', 1, expect.objectContaining({ comments:'Rushed the return', unforcedErrors:4, failedReturns:1, doubleFaults:null })));
+});
+it('keeps confirmation disabled for a draft without games', async () => {
+  const { service } = setup({ ...draft, parsedDraft:{ ...draft.parsedDraft!, games:[] } });
+  const confirm = await screen.findByRole('button', { name:'Confirm and add' });
+  expect(confirm).toBeDisabled(); fireEvent.click(confirm); expect(service.confirmDraft).not.toHaveBeenCalled();
+});
 it('retains parsed games after retry failure and locks duplicate retry', async () => {
   const { service } = setup({ ...draft, state:'waiting-retry', error:{ code:'offline', message:'ignored' } });
   let reject!: (reason: unknown) => void; service.retryDraft.mockReturnValue(new Promise((_, r) => { reject = r; }));

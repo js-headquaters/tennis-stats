@@ -10,7 +10,8 @@ export const tieBreakMetrics = metrics.slice(0, 4) as ReadonlyArray<readonly [ke
 /** Optional per-direction detail counts, shown inside the collapsed details of a game card and form. */
 export const detailMetrics = [ ['netErrors', 'Net errors'], ['wideErrors', 'Wide errors'], ['longErrors', 'Long errors'] ] as const;
 
-function Count({ value }: { value: number | null }) { return value === null ? <span aria-label="unknown">—</span> : <>{value}</>; }
+/** A recorded count, or an announced dash when unknown (never shown as zero). */
+export function Count({ value }: { value: number | null }) { return value === null ? <span aria-label="unknown">—</span> : <>{value}</>; }
 
 export default function GameCard({ game, onEdit, onDelete, disabled }: { game: Game; onEdit?: () => void; onDelete?: () => void; disabled?: boolean }) {
   const unforced = effectiveUnforcedErrors(game);

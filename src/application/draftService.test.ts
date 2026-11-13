@@ -452,3 +452,76 @@ describe('parser context projection', () => {
     expect(JSON.stringify(request)).not.toContain('Alex');
   });
 });
+
+describe('game totals and comments', () => {
+  const audio = () => ({ audio: new Blob(['a']), mimeType: 'audio/mp4' });
+  async function ready(ctx: Awaited<ReturnType<typeof setup>>) {
+    return ctx.service.createDraftFromAudio({ matchId: ctx.match.match.id, setId: ctx.match.sets[0].id, ...audio() }, new AbortController().signal);
+  }
+  it('updates and trims comments and totals through manual draft edits', async () => {
+    const ctx = await setup(); const draft = await ready(ctx);
+    const edited = await ctx.service.updateDraftGame(draft.id, 0, { unforcedErrors: 3, comments: '  late on the backhand  ' });
+    expect(edited.parsedDraft?.games[0]).toMatchObject({ unforcedErrors: 3, netErrors: 0, comments: 'late on the backhand' });
+    expect((await ctx.repository.getDraft(draft.id))?.parsedDraft?.games[0]).toMatchObject({ unforcedErrors: 3, comments: 'late on the backhand' });
+    const cleared = await ctx.service.updateDraftGame(draft.id, 0, { unforcedErrors: 0, comments: ' \n\t ' });
+    expect(cleared.parsedDraft?.games[0]).toMatchObject({ unforcedErrors: 0, comments: null });
+    const exact = await ctx.service.updateDraftGame(draft.id, 0, { comments: 'x'.repeat(10_000) });
+    expect(exact.parsedDraft?.games[0].comments).toHaveLength(10_000);
+  });
+  it('rejects invalid totals and over-long comments without writing', async () => {
+    const ctx = await setup(); const draft = await ready(ctx);
+    const save = vi.spyOn(ctx.repository, 'saveDraft');
+    for (const patch of [{ comments: 'x'.repeat(10_001) }, { unforcedErrors: -1 }, { unforcedErrors: 1.5 }, { unforcedErrors: 2 ** 53 }, { comments: 5 as never }, { unforcedErrors: undefined }, { score: null } as never])
+      await expect(ctx.service.updateDraftGame(draft.id, 0, patch)).rejects.toThrow('Invalid draft game edit');
+    expect(save).not.toHaveBeenCalled();
+    expect((await ctx.repository.getDraft(draft.id))?.parsedDraft).toEqual(draft.parsedDraft);
+  });
+  it('rejects parser output missing the new fields or carrying a match comment', async () => {
+    const ctx = await setup(); const { parsed, parser } = ctx;
+    const { unforcedErrors: _u, ...missing } = parsed.games[0]; void _u;
+    for (const response of [{ ...parsed, games: [missing] }, { ...parsed, comments: 'match' }, { ...parsed, games: [{ ...parsed.games[0], comments: 'x'.repeat(10_001) }] }]) {
+      parser.parse.mockResolvedValueOnce(response as never);
+      const draft = await ready(ctx);
+      expect(draft).toMatchObject({ state: 'waiting-retry', parsedDraft: null, error: { code: 'invalid-response', phase: 'parser' } });
+    }
+  });
+  it('preserves and corrects per-game comments and totals across a refinement', async () => {
+    const ctx = await setup(); const { parser, parsed, service } = ctx;
+    const first = { ...parsed, games: [{ ...parsed.games[0], unforcedErrors: 2, comments: 'stayed calm' }, { ...parsed.games[0], server: 'opponent' as const, result: 'lost' as const, doubleFaults: null, failedReturns: 1, unforcedErrors: 3, comments: 'late on the backhand' }] };
+    parser.parse.mockResolvedValueOnce(first);
+    const draft = await ready(ctx);
+    const edited = await service.updateDraftGame(draft.id, 1, { comments: 'late on the backhand, rushed' });
+    const refined = { ...first, games: [first.games[0], { ...edited.parsedDraft!.games[1], unforcedErrors: 4 }, { ...parsed.games[0], comments: 'third game note' }] };
+    parser.parse.mockResolvedValueOnce(refined);
+    const result = await service.refineDraftWithAudio(draft.id, audio(), new AbortController().signal);
+    expect(parser.parse.mock.calls.at(-1)?.[0].existingDraft?.games.map(game => game.comments)).toEqual(['stayed calm', 'late on the backhand, rushed']);
+    expect(result.parsedDraft?.games.map(game => [game.unforcedErrors, game.comments])).toEqual([[2, 'stayed calm'], [4, 'late on the backhand, rushed'], [null, 'third game note']]);
+  });
+  it('confirms each game with its own stats and comment and leaves the match comment unchanged', async () => {
+    const ctx = await setup(); const { parser, parsed, service, repository, match } = ctx;
+    await updateComments(match.match.id, 'General match note', { repository, clock, ids: { next: () => 'unused' } });
+    const games = [
+      { ...parsed.games[0], unforcedErrors: 2, netErrors: 1, comments: 'stayed calm' },
+      { ...parsed.games[0], server: 'opponent' as const, result: 'lost' as const, netErrors: null, doubleFaults: null, failedReturns: 1, unforcedErrors: 3, comments: 'late on the backhand' },
+      { ...parsed.games[0], netErrors: null, unforcedErrors: 0, comments: null },
+    ];
+    parser.parse.mockResolvedValueOnce({ ...parsed, games });
+    const draft = await ready(ctx);
+    const result = await service.confirmDraft(draft.id);
+    expect(result.bundle.games.map(({ ordinal, server, result, unforcedErrors, netErrors, failedReturns, doubleFaults, comments }) => ({ ordinal, server, result, unforcedErrors, netErrors, failedReturns, doubleFaults, comments }))).toEqual([
+      { ordinal: 1, server: 'player', result: 'won', unforcedErrors: 2, netErrors: 1, failedReturns: null, doubleFaults: null, comments: 'stayed calm' },
+      { ordinal: 2, server: 'opponent', result: 'lost', unforcedErrors: 3, netErrors: null, failedReturns: 1, doubleFaults: null, comments: 'late on the backhand' },
+      { ordinal: 3, server: 'player', result: 'won', unforcedErrors: 0, netErrors: null, failedReturns: null, doubleFaults: null, comments: null },
+    ]);
+    const stored = await repository.getMatchBundle(match.match.id);
+    expect(stored?.match.comments).toBe('General match note');
+    expect(stored?.games).toEqual(result.bundle.games);
+  });
+  it('keeps a zero-game draft unconfirmable', async () => {
+    const ctx = await setup(); ctx.parser.parse.mockResolvedValueOnce({ ...ctx.parsed, games: [] });
+    const draft = await ready(ctx);
+    expect(draft).toMatchObject({ state: 'ready', parsedDraft: { games: [] } });
+    await expect(ctx.service.confirmDraft(draft.id)).rejects.toThrow('could not be confirmed');
+    expect((await ctx.repository.getMatchBundle(ctx.match.match.id))?.games).toHaveLength(0);
+  });
+});
