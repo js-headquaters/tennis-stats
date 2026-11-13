@@ -161,11 +161,11 @@
   `fileName` = `tennis-stats-voice-diagnostics-<matchId>-YYYY-MM-DD.json` (UTC date of `exportedAt`); `text` = `JSON.stringify` (2-space indent) of the envelope from Global Constraints with `match.opponent` = opponent name; rows sorted by `startedAt`.
 - `MatchDetailsPage` gets an optional prop `transfer?: FileTransfer` (default `createBrowserFileTransfer()` created lazily via `useState`, as `DataSettingsSection` does). After the bundle loads it also reads `countDiagnostics(matchId)` (failure ⇒ treated as 0, never blocks the page). When count > 0 it renders `Voice diagnostics: N events` and a button `Download voice diagnostics`; click lists rows, builds the export with `services.clock.now()`, calls `transfer.download(fileName, text)`, shows a `role="status"` notice `Voice diagnostics downloaded.`; a `FileTransferError`/other failure shows `role="alert"`. Not disabled in read-only mode; disabled only while `busy`. The button has the same 44px touch-target treatment as neighbouring buttons.
 
-- [ ] **Step 1: Write failing tests.** Export: file name and envelope fields for a sample bundle; rows sorted; no audio/`recording` keys; JSON round-trips. UI (existing `MatchDetailsPage.test.tsx` style, real fake-indexeddb repo, fake `transfer` with `vi.fn()`): (a) no rows ⇒ no section/button. (b) two saved rows ⇒ text `Voice diagnostics: 2 events` and button; click calls `download` once with the expected name and parseable JSON containing both rows. (c) with a repo in read-only recovery mode (pattern from `recovery.test.ts`/existing read-only test in this file) the button is present and works. (d) `download` throwing shows an alert and the page stays usable. (e) existing tests untouched and passing.
-- [ ] **Step 2: Run** `npx vitest run src/application/diagnosticsExport.test.ts src/features/matches/MatchDetailsPage.test.tsx` — expect FAIL.
-- [ ] **Step 3: Implement** `buildDiagnosticsExport` and the UI section (place it after the comments form, inside a `<section aria-label="Voice diagnostics">`).
-- [ ] **Step 4: Run** `npm test`, `npm run typecheck`, `npm run lint`.
-- [ ] **Step 5: Commit** `feat: download voice diagnostics from match details`.
+- [x] **Step 1: Write failing tests.** Export: file name and envelope fields for a sample bundle; rows sorted; no audio/`recording` keys; JSON round-trips. UI (existing `MatchDetailsPage.test.tsx` style, real fake-indexeddb repo, fake `transfer` with `vi.fn()`): (a) no rows ⇒ no section/button. (b) two saved rows ⇒ text `Voice diagnostics: 2 events` and button; click calls `download` once with the expected name and parseable JSON containing both rows. (c) with a repo in read-only recovery mode (pattern from `recovery.test.ts`/existing read-only test in this file) the button is present and works. (d) `download` throwing shows an alert and the page stays usable. (e) existing tests untouched and passing.
+- [x] **Step 2: Run** `npx vitest run src/application/diagnosticsExport.test.ts src/features/matches/MatchDetailsPage.test.tsx` — expect FAIL.
+- [x] **Step 3: Implement** `buildDiagnosticsExport` and the UI section (place it after the comments form, inside a `<section aria-label="Voice diagnostics">`).
+- [x] **Step 4: Run** `npm test`, `npm run typecheck`, `npm run lint`.
+- [x] **Step 5: Commit** `feat: download voice diagnostics from match details`.
 
 ---
 
