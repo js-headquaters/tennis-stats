@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { AI_ENDPOINTS, expect, test, FAKE_API_KEY, REAL_KEY_PATTERNS, aiScenarios, buildMatchBundle, buildSnapshot, fakeMicrophoneState, installFakeMicrophone, mockAi, readDatabase, seedDatabase } from './fixtures';
+import { AI_ENDPOINTS, CURRENT_DATA_VERSION, expect, test, FAKE_API_KEY, REAL_KEY_PATTERNS, aiScenarios, buildMatchBundle, buildSnapshot, fakeMicrophoneState, installFakeMicrophone, mockAi, readDatabase, seedDatabase } from './fixtures';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -25,7 +25,7 @@ test('seedDatabase round-trips through the app database and readDatabase', async
   await seedDatabase(page, buildSnapshot({ bundles: [bundle], metadata: [{ key: 'confirmed:x', value: { draftId: 'x', matchId: 'm1', confirmedAt: bundle.match.createdAt } }] }), { then: '#/matches' });
   await expect(page.getByRole('link', { name: 'Alex Example' })).toBeVisible();
   const stored = await readDatabase(page);
-  expect(stored.dataVersion).toBe(2);
+  expect(stored.dataVersion).toBe(CURRENT_DATA_VERSION);
   expect(stored.matches).toEqual([bundle.match]);
   expect(stored.games).toEqual(bundle.games);
   expect(stored.games[0]).toMatchObject({ server: 'player', netErrors: 0, wideErrors: null });
