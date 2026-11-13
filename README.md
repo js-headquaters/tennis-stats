@@ -13,6 +13,15 @@ Primary targets are current iPhone Safari and Chrome on iOS (both WebKit). Curre
 - Keys are excluded from backups and are never committed, logged or cached by the service worker.
 - Browser data can be erased or lost when you change device or browser. Back up regularly: **Settings -> Data -> Export backup**, and keep the file somewhere safe. Restore with Import backup.
 
+## Voice diagnostics
+
+To help debug voice parsing, each transcription or parsing call to an AI provider is recorded locally next to the match: the transcript, the raw provider response, timestamps, provider and model, and any error. Audio and API keys are never stored (keys are redacted from provider bodies).
+
+- Diagnostics are kept with the match until the match is deleted.
+- They are excluded from backup files.
+- They are capped at 500 rows per match and 256 KB per text field.
+- To get them, open **Match Details** and choose **Download voice diagnostics**.
+
 ## Local setup
 
 Requires Node 22 and npm.
