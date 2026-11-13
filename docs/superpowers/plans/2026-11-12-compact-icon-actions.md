@@ -71,7 +71,7 @@
 **Files:**
 - Modify: both implementation plans to mark completed steps
 
-- [ ] **Step 1: Run `npm run typecheck && npm run lint && npm test && npm run build && npm run verify:pwa`**
-- [ ] **Step 2: Run `npm run test:e2e -- --project=chromium --project=webkit`**
-- [ ] **Step 3: Mark both plans complete and commit** — `git commit -m "docs: complete dashboard and icon improvements"`
+- [x] **Step 1: Run `npm run typecheck && npm run lint && npm test && npm run build && npm run verify:pwa`**
+- [x] **Step 2: Run `npm run test:e2e -- --project=chromium --project=webkit`**
+- [x] **Step 3: Mark both plans complete and commit** — `git commit -m "docs: complete dashboard and icon improvements"`
 - [ ] **Step 4: Integrate into `develop`, push, watch CI and Pages deployment, then smoke-test the live dashboard and routes**
