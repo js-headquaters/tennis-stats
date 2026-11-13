@@ -150,7 +150,7 @@ function ReviewContent({ draftId, repository, createService = dependencies.creat
         {operation === 'processing' && <button onClick={cancelProcessing}>Cancel processing</button>}
         {operation === 'recording' && <button aria-label="Stop recording" onClick={() => void stop()}><IconLabel icon={CircleStop}>Stop</IconLabel></button>}
         {['requesting', 'recording', 'stopping'].includes(operation) && <button aria-label="Cancel recording" onClick={() => void cancel()}><IconLabel icon={X}>Cancel</IconLabel></button>}
-        <p><button aria-label="Confirm and add" disabled={blocked || !!dirty.size || draft.state !== 'ready' || !draft.parsedDraft?.games.length} onClick={() => void confirm()}><IconLabel icon={Play}>Add games</IconLabel></button></p>
+        <p><button aria-label="Confirm and add" disabled={blocked || !!dirty.size || draft.state !== 'ready' || !draft.parsedDraft?.games.length} onClick={() => void confirm()}><IconLabel icon={Play}>Confirm</IconLabel></button></p>
         {!stale && discardControls}
       </>}
     </>}

@@ -134,7 +134,7 @@ function RecordContent({ matchId, repository, createRecorder = dependencies.crea
       <p role="status" aria-live="polite">{({ idle:'Ready to record.', 'requesting-permission':'Requesting microphone permission…', recording:'Recording…', stopping:'Stopping recording…', saving:'Saving recording…', error:'Recording unavailable.' } as const)[state]}</p>
       {error && <p role="alert">{error}</p>}
       {readOnly && <ReadOnlyNotice disabled="recording is" />}
-      {unsaved && state === 'error' && <><p>This recording has not been saved yet. Starting a new recording discards it.</p><button aria-label="Retry saving recording" onClick={() => void retrySave()}><IconLabel icon={RotateCcw}>Retry save</IconLabel></button></>}
+      {unsaved && state === 'error' && <><p>This recording has not been saved yet. Starting a new recording discards it.</p><button aria-label="Retry saving recording" onClick={() => void retrySave()}><IconLabel icon={RotateCcw}>Retry saving</IconLabel></button></>}
       {(state === 'idle' || state === 'error') && <button aria-label="Start recording" disabled={readOnly} onClick={() => void start()}><IconLabel icon={Mic}>Record</IconLabel></button>}
       {state === 'recording' && <button aria-label="Stop recording" onClick={() => void stop()}><IconLabel icon={CircleStop}>Stop</IconLabel></button>}
       {(state === 'requesting-permission' || state === 'recording' || state === 'stopping') && <button aria-label="Cancel recording" onClick={() => void cancel()}><IconLabel icon={X}>Cancel</IconLabel></button>}

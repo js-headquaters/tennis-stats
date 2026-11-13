@@ -20,7 +20,9 @@ it('shows the saved draft without invoking providers or recording and confirms o
   expect(await screen.findByText('Original transcript')).toBeInTheDocument();
   expect(screen.getByText('Check score')).toBeInTheDocument();
   expect(service.retryDraft).not.toHaveBeenCalled(); expect(service.confirmDraft).not.toHaveBeenCalled(); expect(recorder).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name:'Confirm and add' }));
+  const confirm = screen.getByRole('button', { name:'Confirm and add' });
+  expect(confirm).toHaveTextContent(/^Confirm$/);
+  fireEvent.click(confirm);
   expect(await screen.findByText('Live match')).toBeInTheDocument(); expect(service.confirmDraft).toHaveBeenCalledTimes(1);
 });
 

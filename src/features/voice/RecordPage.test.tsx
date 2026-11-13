@@ -96,7 +96,9 @@ it('keeps the unsaved recording in memory and retries saving the same audio', as
   const { service, recorder } = setup(); service.persistDraftFromAudio.mockRejectedValueOnce({ code:'storage' });
   fireEvent.click(await screen.findByRole('button', { name:'Start recording' }));
   fireEvent.click(await screen.findByRole('button', { name:'Stop recording' }));
-  fireEvent.click(await screen.findByRole('button', { name:'Retry saving recording' }));
+  const retry = await screen.findByRole('button', { name:'Retry saving recording' });
+  expect(retry).toHaveTextContent(/^Retry saving$/);
+  fireEvent.click(retry);
   expect(await screen.findByText('Draft review')).toBeInTheDocument();
   expect(recorder.stop).toHaveBeenCalledTimes(1); expect(service.persistDraftFromAudio).toHaveBeenCalledTimes(2);
   expect(service.persistDraftFromAudio.mock.calls[1][0].audio).toBe(service.persistDraftFromAudio.mock.calls[0][0].audio);

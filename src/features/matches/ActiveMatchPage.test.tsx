@@ -28,7 +28,7 @@ it('shows context and adds a manual game with zero and unknown metrics', async (
   expect(voice).toHaveAttribute('href', '/matches/m/record');
   expect(voice).toHaveTextContent(/^Record$/);
   const manual = screen.getByRole('button', { name:'Manual game entry' });
-  expect(manual).toHaveTextContent(/^Manual entry$/);
+  expect(manual).toHaveTextContent(/^Game entry$/);
   expect(manual.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
   fireEvent.click(manual);
   fireEvent.change(screen.getByLabelText('Net errors'), { target:{ value:'0' } });
