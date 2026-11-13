@@ -91,3 +91,17 @@ it('upgrades a legacy version-1 database through openDatabase', async () => {
     expect(await repo.listOpponents()).toHaveLength(1); expect((await repo.getMatchBundle('m'))?.sets).toHaveLength(2);
   } finally { repo.close(); }
 });
+
+it('advances a version 2 database to the current version without touching matches or drafts', async () => {
+  const db = new TennisDatabase(name); await db.open();
+  const match = { id: 'm', opponentId: 'o', playedAt: 'old', format: 'oneSet' as const, firstServer: 'player' as const, status: 'active' as const, comments: null, createdAt: 'old', updatedAt: 'old' };
+  await db.matches.put(match); await db.drafts.put(richDraft); await db.metadata.put({ key: 'dataVersion', value: 2 }); db.close();
+  const repo = await openDatabase(name);
+  try {
+    expect(repo.getRecoveryStatus()).toEqual({ mode: 'normal' });
+    const reopened = new TennisDatabase(name); await reopened.open();
+    expect((await reopened.metadata.get('dataVersion'))?.value).toBe(3);
+    expect(await reopened.matches.toArray()).toEqual([match]); expect(await reopened.drafts.toArray()).toEqual([richDraft]);
+    reopened.close();
+  } finally { repo.close(); }
+});

@@ -1,4 +1,4 @@
-import type { DatabaseSnapshot, Match, MatchFormat, Server, MatchBundle, MatchStatus, Opponent, ParsedDraft, TennisRecords, VoiceDraft } from '../domain/model';
+import type { DatabaseSnapshot, Match, MatchDiagnostic, MatchFormat, Server, MatchBundle, MatchStatus, Opponent, ParsedDraft, TennisRecords, VoiceDraft } from '../domain/model';
 export type { ParsedDraft, DraftGame } from '../domain/model';
 
 export type AiKind = 'transcription' | 'parser';
@@ -53,6 +53,11 @@ export interface TennisRepository {
   listDrafts(matchId?: string): Promise<VoiceDraft[]>;
   getDraftConfirmation(draftId: string): Promise<{ confirmationId: string; matchId: string; confirmedAt: string } | undefined>;
   deleteDraft(id: string): Promise<void>;
+  /** Upserts one diagnostic row, then prunes that match to its per-match cap in the same transaction. Refused in read-only recovery. */
+  saveDiagnostic(row: MatchDiagnostic): Promise<void>;
+  /** A match's diagnostics, oldest first. */
+  listDiagnostics(matchId: string): Promise<MatchDiagnostic[]>;
+  countDiagnostics(matchId: string): Promise<number>;
   confirmDraft(draftId: string, confirmationId: string, preparedBundle: MatchBundle, confirmedAt: string, baseBundle: MatchBundle): Promise<{ status: 'confirmed' | 'alreadyConfirmed' }>;
   listOpponents(): Promise<Opponent[]>;
   replaceAll(snapshot: DatabaseSnapshot): Promise<void>;

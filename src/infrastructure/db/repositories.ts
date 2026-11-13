@@ -1,6 +1,7 @@
 import type { TennisRepository, MatchFilter, RecoveryStatus } from '../../application/ports';
 import { ReadOnlyRecoveryError } from '../../application/recovery';
-import type { DatabaseSnapshot, Match, MatchBundle, TennisRecords, VoiceDraft } from '../../domain/model';
+import { DIAGNOSTICS_PER_MATCH, diagnosticsToDelete } from '../../domain/diagnostics';
+import type { DatabaseSnapshot, Match, MatchDiagnostic, MatchBundle, TennisRecords, VoiceDraft } from '../../domain/model';
 import { DATA_VERSION } from './migrations';
 import type { TennisDatabase } from './schema';
 import { toSafeDiagnostics, UNKNOWN_CONTEXT, type RecoveryContext } from './recoveryDiagnostics';
@@ -125,7 +126,7 @@ export class IndexedDbTennisRepository implements TennisRepository {
       await this.db.matches.put({ ...match, status: 'abandoned', updatedAt });
     });
   }
-  async deleteMatch(id: string) { this.writable(); await this.db.transaction('rw', this.db.matches, this.db.sets, this.db.games, this.db.tieBreaks, this.db.drafts, async () => { await this.removeChildren(id); await this.db.drafts.where('matchId').equals(id).delete(); await this.db.matches.delete(id); }); }
+  async deleteMatch(id: string) { this.writable(); await this.db.transaction('rw', [this.db.matches, this.db.sets, this.db.games, this.db.tieBreaks, this.db.drafts, this.db.diagnostics], async () => { await this.removeChildren(id); await this.db.drafts.where('matchId').equals(id).delete(); await this.db.diagnostics.where('matchId').equals(id).delete(); await this.db.matches.delete(id); }); }
   async saveDraft(draft: VoiceDraft) {
     this.writable();
     await this.db.transaction('rw', this.db.matches, this.db.drafts, this.db.metadata, async () => {
@@ -150,6 +151,17 @@ export class IndexedDbTennisRepository implements TennisRepository {
     }
     return found;
   }
+  async saveDiagnostic(row: MatchDiagnostic) {
+    this.writable();
+    await this.db.transaction('rw', this.db.diagnostics, async () => {
+      await this.db.diagnostics.put(row);
+      const rows = await this.db.diagnostics.where('matchId').equals(row.matchId).toArray();
+      const doomed = diagnosticsToDelete(rows, DIAGNOSTICS_PER_MATCH);
+      if (doomed.length) await this.db.diagnostics.bulkDelete(doomed);
+    });
+  }
+  async listDiagnostics(matchId: string) { return (await this.db.diagnostics.where('matchId').equals(matchId).toArray()).sort((a, b) => (a.startedAt < b.startedAt ? -1 : a.startedAt > b.startedAt ? 1 : 0)); }
+  async countDiagnostics(matchId: string) { return this.db.diagnostics.where('matchId').equals(matchId).count(); }
   async deleteDraft(id: string) { this.writable(); await this.db.drafts.delete(id); }
   async replaceAll(snapshot: DatabaseSnapshot) {
     this.writable();

@@ -1,11 +1,12 @@
 // @vitest-environment node
 import 'fake-indexeddb/auto';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { MatchBundle, DatabaseSnapshot, VoiceDraft } from '../../domain/model';
+import type { MatchBundle, DatabaseSnapshot, VoiceDraft, MatchDiagnostic } from '../../domain/model';
 import { openDatabase } from './database';
 import { TennisDatabase } from './schema';
 import { IndexedDbTennisRepository } from './repositories';
 import { DATA_VERSION } from './migrations';
+import { ReadOnlyRecoveryError } from '../../application/recovery';
 
 const stamp = { createdAt: '2026-01-01', updatedAt: '2026-01-01' };
 const bundle = (id: string, status: 'active' | 'completed' = 'active'): MatchBundle => ({
@@ -392,5 +393,55 @@ describe('IndexedDB repository backup support', () => {
     const repo = new IndexedDbTennisRepository(db, new Error('recovery'));
     cleanup.push(async () => { repo.close(); await indexedDBDelete(name); });
     await expect(repo.insertRecords(records(bundle('a', 'completed')))).rejects.toThrow(/read.only/i);
+  });
+});
+
+const diag = (id: string, matchId: string, startedAt: string, outcome: MatchDiagnostic['outcome'] = 'success'): MatchDiagnostic => ({ id, matchId, setId: null, draftId: null, phase: 'parser', attempt: 1, provider: 'p', model: 'm', startedAt, finishedAt: startedAt, outcome, transcript: null, request: null, response: null, error: null });
+describe('diagnostics storage', () => {
+  it('lists per match sorted by startedAt and counts', async () => {
+    const repo = await setup();
+    await repo.saveDiagnostic(diag('a2', 'A', '2026-01-02')); await repo.saveDiagnostic(diag('a1', 'A', '2026-01-01')); await repo.saveDiagnostic(diag('b1', 'B', '2026-01-01'));
+    expect((await repo.listDiagnostics('A')).map(r => r.id)).toEqual(['a1', 'a2']);
+    expect(await repo.countDiagnostics('A')).toBe(2); expect(await repo.countDiagnostics('B')).toBe(1);
+  });
+  it('deleteMatch removes only that match diagnostics', async () => {
+    const repo = await setup(); await repo.saveMatchBundle(bundle('A', 'completed'));
+    await repo.saveDiagnostic(diag('a1', 'A', '1')); await repo.saveDiagnostic(diag('b1', 'B', '1'));
+    await repo.deleteMatch('A');
+    expect(await repo.listDiagnostics('A')).toEqual([]); expect(await repo.listDiagnostics('B')).toHaveLength(1);
+  });
+  it('keeps rows across draft confirmation and deletion', async () => {
+    const repo = await setup(); const initial = bundle('A'); await repo.saveMatchBundle(initial); await repo.saveDraft(draftFixture('A'));
+    await repo.saveDiagnostic(diag('a1', 'A', '1'));
+    await repo.confirmDraft('d', 'c', initial, 'now', bundle('A'));
+    expect(await repo.countDiagnostics('A')).toBe(1);
+    await repo.saveDraft({ ...draftFixture('A'), id: 'd2', confirmationId: 'c2' }); await repo.deleteDraft('d2');
+    expect(await repo.countDiagnostics('A')).toBe(1);
+  });
+  it('replaceAll clears diagnostics and snapshot omits them', async () => {
+    const repo = await setup(); const item = bundle('a', 'completed');
+    await repo.saveDiagnostic(diag('a1', 'a', '1'));
+    expect(await repo.snapshot()).not.toHaveProperty('diagnostics');
+    await repo.replaceAll({ dataVersion: DATA_VERSION, opponents: [item.opponent], matches: [item.match], sets: item.sets, games: item.games, tieBreaks: item.tieBreaks, voiceDrafts: [] });
+    expect(await repo.countDiagnostics('a')).toBe(0);
+    expect(await repo.snapshot()).not.toHaveProperty('diagnostics');
+  });
+  it('prunes to 500 per match, dropping successes first, then the oldest', async () => {
+    const repo = await setup(); const t = (i: number) => `2026-01-01T00:${String(Math.floor(i / 60)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}`;
+    for (let i = 0; i < 505; i++) await repo.saveDiagnostic(diag(`r${i}`, 'A', t(i), i < 5 ? 'success' : 'error'));
+    const rows = await repo.listDiagnostics('A');
+    expect(rows).toHaveLength(500); expect(rows.some(r => r.outcome === 'success')).toBe(false);
+    const repo2 = await setup();
+    for (let i = 0; i < 501; i++) await repo2.saveDiagnostic(diag(`r${i}`, 'A', t(i), 'error'));
+    const rows2 = await repo2.listDiagnostics('A');
+    expect(rows2).toHaveLength(500); expect(rows2[0].id).toBe('r1');
+  }, 60000);
+  it('refuses saves in read-only recovery but still lists', async () => {
+    const name = `diag-recovery-${crypto.randomUUID()}`;
+    const db = new TennisDatabase(name); await db.open();
+    const repo = new IndexedDbTennisRepository(db, new Error('recovery'));
+    cleanup.push(async () => { repo.close(); await indexedDBDelete(name); });
+    await expect(repo.saveDiagnostic(diag('x', 'A', '1'))).rejects.toBeInstanceOf(ReadOnlyRecoveryError);
+    expect(await repo.listDiagnostics('A')).toEqual([]);
   });
 });

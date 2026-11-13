@@ -1,6 +1,6 @@
 import type { VoiceDraft } from '../../domain/model';
 import type { TennisDatabase } from './schema';
-export const DATA_VERSION = 2;
+export const DATA_VERSION = 3;
 
 const states: ReadonlySet<string> = new Set(['recorded', 'processing', 'waiting-retry', 'ready', 'error', 'confirming']);
 const legacyMessage = 'This draft was saved by an earlier version. Retry processing to continue.';
@@ -39,6 +39,8 @@ const migrations: Record<number, (db: TennisDatabase) => Promise<void>> = {
   // Version 0 records already use the initial domain shape.
   0: async () => {},
   1: migrateLegacyDrafts,
+  // Version 2 -> 3: the diagnostics table is created by the Dexie schema; there is nothing to convert.
+  2: async () => {},
 };
 
 /** `onStep` is told which step starts, before it runs, so a failure can be reported against that step. */
